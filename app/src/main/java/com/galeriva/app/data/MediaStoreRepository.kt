@@ -1,12 +1,57 @@
 package com.galeriva.app.data
 
+import android.app.RecoverableSecurityException
 import android.content.ContentResolver
 import android.content.ContentUris
+import android.content.IntentSender
+import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.security.MessageDigest
 
 class MediaStoreRepository(private val contentResolver: ContentResolver) {
+
+    /**
+     * Deletes photos. On Android 11+ this returns an IntentSender that must be
+     * launched so the user confirms via the system dialog; on older versions the
+     * delete happens directly and null is returned.
+     */
+    suspend fun deletePhotos(uris: List<Uri>): IntentSender? = withContext(Dispatchers.IO) {
+        if (uris.isEmpty()) return@withContext null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            return@withContext MediaStore.createDeleteRequest(contentResolver, uris).intentSender
+        }
+        try {
+            uris.forEach { contentResolver.delete(it, null, null) }
+            null
+        } catch (e: SecurityException) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && e is RecoverableSecurityException) {
+                e.userAction.actionIntent.intentSender
+            } else {
+                throw e
+            }
+        }
+    }
+
+    /** MD5 of the full file content; null if unreadable. Used for duplicate detection. */
+    suspend fun contentHash(uri: Uri): String? = withContext(Dispatchers.IO) {
+        try {
+            contentResolver.openInputStream(uri)?.use { input ->
+                val digest = MessageDigest.getInstance("MD5")
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read <= 0) break
+                    digest.update(buffer, 0, read)
+                }
+                digest.digest().joinToString("") { "%02x".format(it) }
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     suspend fun loadAllPhotos(): List<Photo> = withContext(Dispatchers.IO) {
         val photos = mutableListOf<Photo>()

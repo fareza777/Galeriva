@@ -34,7 +34,8 @@ import com.galeriva.app.ui.SmartAlbum
 @Composable
 fun AlbumsScreen(
     viewModel: GalleryViewModel,
-    onAlbumClick: (SmartAlbum) -> Unit
+    onAlbumClick: (SmartAlbum) -> Unit,
+    onDuplicatesClick: () -> Unit
 ) {
     val smartAlbums by viewModel.smartAlbums.collectAsStateWithLifecycle()
     val folderAlbums by viewModel.folderAlbums.collectAsStateWithLifecycle()
@@ -43,6 +44,25 @@ fun AlbumsScreen(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(vertical = 8.dp)
     ) {
+        item {
+            Surface(
+                onClick = onDuplicatesClick,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("🧹 Foto Duplikat", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Temukan foto yang persis sama dan bebaskan ruang",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
         if (smartAlbums.isNotEmpty()) {
             item {
                 SectionTitle("Album Pintar")

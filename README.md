@@ -9,7 +9,9 @@ Aplikasi galeri foto Android premium dengan pengelolaan pintar **100% on-device*
 - **Pencarian bahasa Indonesia** — ketik "rapat" dan semua foto rapat/whiteboard/presentasi muncul. Kamus kata kunci ID→EN ada di `SearchKeywords.kt`.
 - **Album pintar** — kategori otomatis: Rapat & Kerja, Orang, Makanan, Alam, Hewan, Kendaraan, Dokumen, Kota.
 - **Album folder** — folder asli perangkat dari MediaStore.
-- **Viewer** — swipe antar foto, pinch-to-zoom, favorit, bagikan.
+- **Viewer** — swipe antar foto, pinch-to-zoom, favorit, bagikan, hapus.
+- **Multi-select** — tekan-lama foto di galeri untuk memilih banyak, lalu hapus atau bagikan sekaligus (dialog konfirmasi sistem Android).
+- **Deteksi duplikat** — pindai foto yang persis sama (pre-filter ukuran+dimensi, konfirmasi MD5) dan hapus untuk membebaskan ruang.
 
 ## Teknologi
 
@@ -25,11 +27,30 @@ Setiap push ke `main` otomatis mem-build APK debug. Unduh dari tab **Actions →
 ### Lokal (Android Studio)
 Buka folder proyek di Android Studio (Ladybug atau lebih baru) dan jalankan konfigurasi `app`.
 
-## Roadmap menuju Play Store
+## Rilis ke Play Store
 
-- [ ] Signing key release + `bundleRelease` (AAB)
-- [ ] Deteksi foto duplikat/mirip (perceptual hash)
+CI sudah mem-build **AAB release** (`galeriva-release-aab` di Artifacts). Tanpa keystore, AAB ditandatangani dengan debug key (cukup untuk uji coba, belum bisa diunggah ke Play Store).
+
+Untuk signing resmi, buat keystore lalu tambahkan GitHub Secrets:
+
+| Secret | Isi |
+|---|---|
+| `KEYSTORE_BASE64` | file `.jks` di-encode base64 |
+| `KEYSTORE_PASSWORD` | password keystore |
+| `KEY_ALIAS` | alias key |
+| `KEY_PASSWORD` | password key |
+
+Buat keystore: `keytool -genkeypair -v -keystore galeriva.jks -keyalg RSA -keysize 2048 -validity 10000 -alias galeriva`
+
+Kebijakan privasi (wajib Play Store): [PRIVACY.md](PRIVACY.md)
+
+## Roadmap
+
+- [x] Multi-select + hapus/bagikan batch
+- [x] Deteksi foto duplikat (MD5)
+- [x] Build release AAB via CI + dukungan signing
+- [x] Kebijakan privasi
 - [ ] Pengelompokan wajah (ML Kit Face Detection)
-- [ ] Multi-select + hapus/pindah batch (MediaStore `createDeleteRequest`)
+- [ ] Foto mirip / hampir duplikat (perceptual hash)
 - [ ] Folder terkunci (BiometricPrompt)
-- [ ] Halaman kebijakan privasi (wajib Play Store)
+- [ ] Papan tombol pindah/salin ke album

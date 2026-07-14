@@ -17,6 +17,19 @@ android {
         versionName = "1.0.0"
     }
 
+    signingConfigs {
+        create("release") {
+            // Set via CI secrets or local env vars; falls back to debug signing when absent.
+            val keystorePath = System.getenv("GALERIVA_KEYSTORE_FILE")
+            if (keystorePath != null) {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("GALERIVA_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("GALERIVA_KEY_ALIAS")
+                keyPassword = System.getenv("GALERIVA_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -25,6 +38,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig =
+                if (System.getenv("GALERIVA_KEYSTORE_FILE") != null)
+                    signingConfigs.getByName("release")
+                else
+                    signingConfigs.getByName("debug")
         }
     }
     compileOptions {

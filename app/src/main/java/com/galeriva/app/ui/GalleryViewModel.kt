@@ -104,6 +104,89 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    // ----- Multi-select -----
+
+    val selectedIds = MutableStateFlow<Set<Long>>(emptySet())
+
+    fun toggleSelection(photoId: Long) {
+        selectedIds.value =
+            if (photoId in selectedIds.value) selectedIds.value - photoId
+            else selectedIds.value + photoId
+    }
+
+    fun clearSelection() {
+        selectedIds.value = emptySet()
+    }
+
+    /**
+     * Deletes the given photos. If Android requires user confirmation,
+     * [onNeedsConfirm] is invoked with the IntentSender to launch; after the
+     * launcher succeeds, call [onDeleteConfirmed].
+     */
+    fun deletePhotoIds(
+        ids: Set<Long>,
+        onNeedsConfirm: (android.content.IntentSender) -> Unit
+    ) {
+        viewModelScope.launch {
+            val uris = _photos.value.filter { it.id in ids }.map { it.uri }
+            val sender = try {
+                repository.deletePhotos(uris)
+            } catch (_: SecurityException) {
+                null
+            }
+            if (sender != null) {
+                onNeedsConfirm(sender)
+            } else {
+                onDeleteConfirmed()
+            }
+        }
+    }
+
+    /** Refreshes state after a successful delete (direct or via system dialog). */
+    fun onDeleteConfirmed() {
+        clearSelection()
+        _duplicateGroups.value = emptyList()
+        refresh()
+    }
+
+    // ----- Duplicate detection -----
+
+    private val _duplicateGroups = MutableStateFlow<List<List<Photo>>>(emptyList())
+    val duplicateGroups: StateFlow<List<List<Photo>>> = _duplicateGroups.asStateFlow()
+
+    private val _isScanningDuplicates = MutableStateFlow(false)
+    val isScanningDuplicates: StateFlow<Boolean> = _isScanningDuplicates.asStateFlow()
+
+    fun scanDuplicates() {
+        if (_isScanningDuplicates.value) return
+        viewModelScope.launch {
+            _isScanningDuplicates.value = true
+            try {
+                // Cheap pre-filter: identical size + dimensions, then confirm by MD5.
+                val candidates = _photos.value
+                    .filter { it.sizeBytes > 0 }
+                    .groupBy { Triple(it.sizeBytes, it.width, it.height) }
+                    .values
+                    .filter { it.size > 1 }
+
+                val groups = mutableListOf<List<Photo>>()
+                for (candidate in candidates) {
+                    candidate
+                        .mapNotNull { photo ->
+                            repository.contentHash(photo.uri)?.let { hash -> hash to photo }
+                        }
+                        .groupBy({ it.first }, { it.second })
+                        .values
+                        .filter { it.size > 1 }
+                        .forEach { groups += it }
+                }
+                _duplicateGroups.value = groups
+            } finally {
+                _isScanningDuplicates.value = false
+            }
+        }
+    }
+
     fun toggleFavorite(photoId: Long) {
         viewModelScope.launch {
             if (photoId in favoriteIds.value) favoriteDao.remove(photoId)

@@ -1,6 +1,10 @@
 package com.galeriva.app.ui.viewer
 
+import android.app.Activity
 import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
@@ -12,6 +16,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Share
@@ -49,6 +54,15 @@ fun PhotoViewerScreen(
     val favorites by viewModel.favoriteIds.collectAsStateWithLifecycle()
     val startIndex = photos.indexOfFirst { it.id == initialPhotoId }.coerceAtLeast(0)
     val pagerState = rememberPagerState(initialPage = startIndex) { photos.size }
+
+    val deleteLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            viewModel.onDeleteConfirmed()
+            onBack()
+        }
+    }
 
     Box(
         Modifier
@@ -95,6 +109,13 @@ fun PhotoViewerScreen(
                 context.startActivity(Intent.createChooser(intent, "Bagikan foto"))
             }) {
                 Icon(Icons.Filled.Share, "Bagikan", tint = Color.White)
+            }
+            IconButton(onClick = {
+                viewModel.deletePhotoIds(setOf(current.id)) { sender ->
+                    deleteLauncher.launch(IntentSenderRequest.Builder(sender).build())
+                }
+            }) {
+                Icon(Icons.Filled.Delete, "Hapus", tint = Color.White)
             }
         }
     }

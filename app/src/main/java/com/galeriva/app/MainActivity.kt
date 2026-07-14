@@ -175,9 +175,17 @@ private fun GalerivaNavHost() {
                 }
             }
             composable("albums") {
-                AlbumsScreen(viewModel) { album ->
-                    navController.navigate("album/${album.id}")
-                }
+                AlbumsScreen(
+                    viewModel = viewModel,
+                    onAlbumClick = { album -> navController.navigate("album/${album.id}") },
+                    onDuplicatesClick = { navController.navigate("duplicates") }
+                )
+            }
+            composable("duplicates") {
+                com.galeriva.app.ui.duplicates.DuplicatesScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                )
             }
             composable("search") {
                 SearchScreen(viewModel) { photo ->
