@@ -11,8 +11,12 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Photo
@@ -49,6 +53,7 @@ import androidx.navigation.compose.rememberNavController
 import com.galeriva.app.ui.GalleryViewModel
 import com.galeriva.app.ui.albums.AlbumsScreen
 import com.galeriva.app.ui.gallery.GalleryScreen
+import com.galeriva.app.ui.gallery.PhotoThumbnail
 import com.galeriva.app.ui.search.SearchScreen
 import com.galeriva.app.ui.theme.GalerivaTheme
 import com.galeriva.app.ui.viewer.PhotoViewerScreen
@@ -234,13 +239,13 @@ private fun AlbumDetailScreen(
             )
         }
     ) { padding ->
-        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-            columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(104.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(4.dp),
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(104.dp),
+            contentPadding = PaddingValues(4.dp),
             modifier = Modifier.padding(padding)
         ) {
-            androidx.compose.foundation.lazy.grid.items(album.photos, key = { it.id }) { photo ->
-                com.galeriva.app.ui.gallery.PhotoThumbnail(
+            items(album.photos, key = { it.id }) { photo ->
+                PhotoThumbnail(
                     photo = photo,
                     isFavorite = photo.id in favorites,
                     onClick = { onPhotoClick(photo) }
