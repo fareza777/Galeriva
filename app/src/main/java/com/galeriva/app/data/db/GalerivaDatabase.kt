@@ -29,6 +29,17 @@ data class FavoriteEntity(
     @PrimaryKey val photoId: Long
 )
 
+@Entity(tableName = "photo_hashes")
+data class PhotoHashEntity(
+    @PrimaryKey val photoId: Long,
+    val dhash: Long
+)
+
+@Entity(tableName = "locked_photos")
+data class LockedPhotoEntity(
+    @PrimaryKey val photoId: Long
+)
+
 @Dao
 interface PhotoLabelDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -62,14 +73,43 @@ interface FavoriteDao {
     fun favoriteIds(): Flow<List<Long>>
 }
 
+@Dao
+interface PhotoHashDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(hash: PhotoHashEntity)
+
+    @Query("SELECT * FROM photo_hashes")
+    suspend fun allHashes(): List<PhotoHashEntity>
+}
+
+@Dao
+interface LockedPhotoDao {
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun lock(entities: List<LockedPhotoEntity>)
+
+    @Query("DELETE FROM locked_photos WHERE photoId IN (:photoIds)")
+    suspend fun unlock(photoIds: List<Long>)
+
+    @Query("SELECT photoId FROM locked_photos")
+    fun lockedIds(): Flow<List<Long>>
+}
+
 @Database(
-    entities = [PhotoLabelEntity::class, IndexedPhotoEntity::class, FavoriteEntity::class],
-    version = 1,
+    entities = [
+        PhotoLabelEntity::class,
+        IndexedPhotoEntity::class,
+        FavoriteEntity::class,
+        PhotoHashEntity::class,
+        LockedPhotoEntity::class
+    ],
+    version = 2,
     exportSchema = false
 )
 abstract class GalerivaDatabase : RoomDatabase() {
     abstract fun photoLabelDao(): PhotoLabelDao
     abstract fun favoriteDao(): FavoriteDao
+    abstract fun photoHashDao(): PhotoHashDao
+    abstract fun lockedPhotoDao(): LockedPhotoDao
 
     companion object {
         fun create(context: Context): GalerivaDatabase =

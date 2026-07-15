@@ -35,7 +35,9 @@ import com.galeriva.app.ui.SmartAlbum
 fun AlbumsScreen(
     viewModel: GalleryViewModel,
     onAlbumClick: (SmartAlbum) -> Unit,
-    onDuplicatesClick: () -> Unit
+    onDuplicatesClick: () -> Unit,
+    onSimilarClick: () -> Unit,
+    onVaultClick: () -> Unit
 ) {
     val smartAlbums by viewModel.smartAlbums.collectAsStateWithLifecycle()
     val folderAlbums by viewModel.folderAlbums.collectAsStateWithLifecycle()
@@ -45,23 +47,21 @@ fun AlbumsScreen(
         contentPadding = PaddingValues(vertical = 8.dp)
     ) {
         item {
-            Surface(
-                onClick = onDuplicatesClick,
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
-            ) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("🧹 Foto Duplikat", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Temukan foto yang persis sama dan bebaskan ruang",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
+            ToolCard(
+                title = "🧹 Foto Duplikat",
+                subtitle = "Temukan foto yang persis sama dan bebaskan ruang",
+                onClick = onDuplicatesClick
+            )
+            ToolCard(
+                title = "✨ Foto Mirip",
+                subtitle = "Kelompokkan jepretan beruntun dan pilih yang terbaik",
+                onClick = onSimilarClick
+            )
+            ToolCard(
+                title = "🔒 Brankas",
+                subtitle = "Foto tersembunyi, dilindungi sidik jari / kunci layar",
+                onClick = onVaultClick
+            )
         }
         if (smartAlbums.isNotEmpty()) {
             item {
@@ -79,6 +79,27 @@ fun AlbumsScreen(
         item { SectionTitle("Folder di Perangkat") }
         items(folderAlbums, key = { it.id }) { album ->
             FolderRow(album) { onAlbumClick(album) }
+        }
+    }
+}
+
+@Composable
+private fun ToolCard(title: String, subtitle: String, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -35,17 +34,58 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.galeriva.app.data.Photo
 import com.galeriva.app.ui.GalleryViewModel
 import com.galeriva.app.ui.gallery.PhotoThumbnail
 
+@Composable
+fun DuplicatesScreen(viewModel: GalleryViewModel, onBack: () -> Unit) {
+    val groups by viewModel.duplicateGroups.collectAsStateWithLifecycle()
+    val isScanning by viewModel.isScanningDuplicates.collectAsStateWithLifecycle()
+    CleanupScreen(
+        title = "Foto Duplikat",
+        emptyText = "Pindai galeri untuk menemukan foto yang persis sama " +
+            "dan bebaskan ruang penyimpanan.",
+        groupLabel = { group ->
+            "${group.size} foto sama — ${formatSize(group.first().sizeBytes)} per foto"
+        },
+        groups = groups,
+        isScanning = isScanning,
+        onScan = { viewModel.scanDuplicates() },
+        viewModel = viewModel,
+        onBack = onBack
+    )
+}
+
+@Composable
+fun SimilarScreen(viewModel: GalleryViewModel, onBack: () -> Unit) {
+    val groups by viewModel.similarGroups.collectAsStateWithLifecycle()
+    val isScanning by viewModel.isScanningSimilar.collectAsStateWithLifecycle()
+    CleanupScreen(
+        title = "Foto Mirip",
+        emptyText = "Pindai galeri untuk menemukan foto yang tampak mirip " +
+            "(mis. jepretan beruntun) dan pilih yang terbaik.",
+        groupLabel = { group -> "${group.size} foto mirip" },
+        groups = groups,
+        isScanning = isScanning,
+        onScan = { viewModel.scanSimilar() },
+        viewModel = viewModel,
+        onBack = onBack
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DuplicatesScreen(
+private fun CleanupScreen(
+    title: String,
+    emptyText: String,
+    groupLabel: (List<Photo>) -> String,
+    groups: List<List<Photo>>,
+    isScanning: Boolean,
+    onScan: () -> Unit,
     viewModel: GalleryViewModel,
     onBack: () -> Unit
 ) {
-    val groups by viewModel.duplicateGroups.collectAsStateWithLifecycle()
-    val isScanning by viewModel.isScanningDuplicates.collectAsStateWithLifecycle()
     val selected by viewModel.selectedIds.collectAsStateWithLifecycle()
 
     val deleteLauncher = rememberLauncherForActivityResult(
@@ -57,7 +97,7 @@ fun DuplicatesScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Foto Duplikat") },
+                title = { Text(title) },
                 navigationIcon = {
                     IconButton(onClick = { viewModel.clearSelection(); onBack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Kembali")
@@ -93,7 +133,7 @@ fun DuplicatesScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator()
                     Text(
-                        "Memindai duplikat…",
+                        "Memindai…",
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(top = 12.dp)
                     )
@@ -109,17 +149,13 @@ fun DuplicatesScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    "Pindai galeri untuk menemukan foto yang persis sama " +
-                        "dan bebaskan ruang penyimpanan.",
+                    emptyText,
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Button(
-                    onClick = { viewModel.scanDuplicates() },
-                    modifier = Modifier.padding(top = 16.dp)
-                ) {
-                    Text("Pindai Duplikat")
+                Button(onClick = onScan, modifier = Modifier.padding(top = 16.dp)) {
+                    Text("Pindai")
                 }
             }
 
@@ -131,8 +167,8 @@ fun DuplicatesScreen(
             ) {
                 item {
                     Text(
-                        "${groups.size} grup duplikat ditemukan. " +
-                            "Ketuk foto yang ingin dihapus (sisakan satu per grup).",
+                        "${groups.size} grup ditemukan. Ketuk foto yang ingin " +
+                            "dihapus (sisakan satu per grup).",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
@@ -140,15 +176,11 @@ fun DuplicatesScreen(
                 }
                 items(groups, key = { it.first().id }) { group ->
                     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                        Row(
-                            Modifier.padding(horizontal = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                "${group.size} foto sama — ${formatSize(group.first().sizeBytes)} per foto",
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                        }
+                        Text(
+                            groupLabel(group),
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        )
                         LazyRow(
                             contentPadding = PaddingValues(horizontal = 12.dp),
                             horizontalArrangement = Arrangement.spacedBy(4.dp)

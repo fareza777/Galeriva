@@ -86,6 +86,9 @@ dependencies {
     // Background indexing
     implementation("androidx.work:work-runtime-ktx:2.9.1")
 
+    // Vault authentication (biometric / device credential)
+    implementation("androidx.biometric:biometric:1.1.0")
+
     // On-device ML: image labeling (bundled model, works offline)
     implementation("com.google.mlkit:image-labeling:17.0.9")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")

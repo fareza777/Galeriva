@@ -7,6 +7,7 @@ import com.galeriva.app.GalerivaApp
 import com.galeriva.app.data.MediaStoreRepository
 import com.galeriva.app.data.Photo
 import com.galeriva.app.data.db.FavoriteEntity
+import com.galeriva.app.data.db.LockedPhotoEntity
 import com.galeriva.app.data.db.PhotoLabelEntity
 import com.galeriva.app.search.SearchKeywords
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,9 +33,26 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     private val repository = MediaStoreRepository(application.contentResolver)
     private val labelDao = app.database.photoLabelDao()
     private val favoriteDao = app.database.favoriteDao()
+    private val hashDao = app.database.photoHashDao()
+    private val lockedDao = app.database.lockedPhotoDao()
 
-    private val _photos = MutableStateFlow<List<Photo>>(emptyList())
-    val photos: StateFlow<List<Photo>> = _photos.asStateFlow()
+    private val _allPhotos = MutableStateFlow<List<Photo>>(emptyList())
+
+    val lockedIds: StateFlow<Set<Long>> =
+        lockedDao.lockedIds()
+            .map { it.toSet() }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+    /** All photos except those locked in the vault. */
+    val photos: StateFlow<List<Photo>> =
+        combine(_allPhotos, lockedIds) { all, locked ->
+            all.filter { it.id !in locked }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val lockedPhotos: StateFlow<List<Photo>> =
+        combine(_allPhotos, lockedIds) { all, locked ->
+            all.filter { it.id in locked }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -56,7 +74,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
     val searchResults: StateFlow<List<Photo>> =
-        combine(_photos, labelsByPhoto, searchQuery) { photos, labels, query ->
+        combine(photos, labelsByPhoto, searchQuery) { photos, labels, query ->
             if (query.isBlank()) return@combine emptyList()
             val terms = SearchKeywords.expand(query)
             photos.filter { photo ->
@@ -69,7 +87,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     /** Folder albums straight from MediaStore buckets. */
     val folderAlbums: StateFlow<List<SmartAlbum>> =
-        _photos.map { photos ->
+        photos.map { photos ->
             photos.groupBy { it.bucketName }
                 .map { (bucket, items) ->
                     SmartAlbum("folder:$bucket", bucket, items.firstOrNull(), items)
@@ -79,7 +97,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     /** Smart albums from ML labels (Orang, Makanan, Dokumen, Alam, ...). */
     val smartAlbums: StateFlow<List<SmartAlbum>> =
-        combine(_photos, labelsByPhoto) { photos, labels ->
+        combine(photos, labelsByPhoto) { photos, labels ->
             SMART_CATEGORIES.mapNotNull { (title, matchLabels) ->
                 val items = photos.filter { photo ->
                     labels[photo.id].orEmpty().any { row ->
@@ -98,7 +116,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     fun refresh() {
         viewModelScope.launch {
             _isLoading.value = true
-            _photos.value = repository.loadAllPhotos()
+            _allPhotos.value = repository.loadAllPhotos()
             _isLoading.value = false
             app.scheduleIndexing()
         }
@@ -128,7 +146,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         onNeedsConfirm: (android.content.IntentSender) -> Unit
     ) {
         viewModelScope.launch {
-            val uris = _photos.value.filter { it.id in ids }.map { it.uri }
+            val uris = _allPhotos.value.filter { it.id in ids }.map { it.uri }
             val sender = try {
                 repository.deletePhotos(uris)
             } catch (_: SecurityException) {
@@ -146,7 +164,72 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     fun onDeleteConfirmed() {
         clearSelection()
         _duplicateGroups.value = emptyList()
+        _similarGroups.value = emptyList()
         refresh()
+    }
+
+    // ----- Vault (locked photos) -----
+
+    fun lockSelected() {
+        viewModelScope.launch {
+            lockedDao.lock(selectedIds.value.map { LockedPhotoEntity(it) })
+            clearSelection()
+        }
+    }
+
+    fun unlockPhotos(ids: Set<Long>) {
+        viewModelScope.launch {
+            lockedDao.unlock(ids.toList())
+            clearSelection()
+        }
+    }
+
+    // ----- Similar photo detection (perceptual hash) -----
+
+    private val _similarGroups = MutableStateFlow<List<List<Photo>>>(emptyList())
+    val similarGroups: StateFlow<List<List<Photo>>> = _similarGroups.asStateFlow()
+
+    private val _isScanningSimilar = MutableStateFlow(false)
+    val isScanningSimilar: StateFlow<Boolean> = _isScanningSimilar.asStateFlow()
+
+    fun scanSimilar() {
+        if (_isScanningSimilar.value) return
+        viewModelScope.launch {
+            _isScanningSimilar.value = true
+            try {
+                val photosById = photos.value.associateBy { it.id }
+                val hashes = hashDao.allHashes().filter { it.photoId in photosById }
+                // Union-find over photos whose dHash differs by <= threshold bits.
+                val parent = IntArray(hashes.size) { it }
+                fun find(i: Int): Int {
+                    var root = i
+                    while (parent[root] != root) root = parent[root]
+                    return root
+                }
+                for (i in hashes.indices) {
+                    for (j in i + 1 until hashes.size) {
+                        val distance =
+                            java.lang.Long.bitCount(hashes[i].dhash xor hashes[j].dhash)
+                        if (distance <= SIMILARITY_THRESHOLD_BITS) {
+                            val ri = find(i)
+                            val rj = find(j)
+                            if (ri != rj) parent[rj] = ri
+                        }
+                    }
+                }
+                _similarGroups.value = hashes.indices
+                    .groupBy { find(it) }
+                    .values
+                    .filter { it.size > 1 }
+                    .map { indices ->
+                        indices.mapNotNull { photosById[hashes[it].photoId] }
+                            .sortedByDescending { it.dateTakenMillis }
+                    }
+                    .filter { it.size > 1 }
+            } finally {
+                _isScanningSimilar.value = false
+            }
+        }
     }
 
     // ----- Duplicate detection -----
@@ -163,7 +246,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             _isScanningDuplicates.value = true
             try {
                 // Cheap pre-filter: identical size + dimensions, then confirm by MD5.
-                val candidates = _photos.value
+                val candidates = photos.value
                     .filter { it.sizeBytes > 0 }
                     .groupBy { Triple(it.sizeBytes, it.width, it.height) }
                     .values
@@ -198,6 +281,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         (smartAlbums.value + folderAlbums.value).firstOrNull { it.id == albumId }
 
     companion object {
+        private const val SIMILARITY_THRESHOLD_BITS = 6
+
         private val SMART_CATEGORIES: List<Pair<String, List<String>>> = listOf(
             "Rapat & Kerja" to listOf("meeting", "whiteboard", "presentation", "computer", "paper", "office", "desk"),
             "Orang" to listOf("person", "people", "selfie", "smile", "crowd", "face"),

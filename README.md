@@ -12,6 +12,8 @@ Aplikasi galeri foto Android premium dengan pengelolaan pintar **100% on-device*
 - **Viewer** — swipe antar foto, pinch-to-zoom, favorit, bagikan, hapus.
 - **Multi-select** — tekan-lama foto di galeri untuk memilih banyak, lalu hapus atau bagikan sekaligus (dialog konfirmasi sistem Android).
 - **Deteksi duplikat** — pindai foto yang persis sama (pre-filter ukuran+dimensi, konfirmasi MD5) dan hapus untuk membebaskan ruang.
+- **Foto mirip** — perceptual hash (dHash 64-bit, dihitung saat pengindeksan) mengelompokkan jepretan beruntun/foto hampir sama.
+- **Brankas** — sembunyikan foto dari galeri/album/pencarian, dilindungi sidik jari atau kunci layar (BiometricPrompt). Catatan: foto tetap ada di penyimpanan dan masih terlihat di aplikasi galeri lain.
 
 ## Teknologi
 
@@ -50,7 +52,8 @@ Kebijakan privasi (wajib Play Store): [PRIVACY.md](PRIVACY.md)
 - [x] Deteksi foto duplikat (MD5)
 - [x] Build release AAB via CI + dukungan signing
 - [x] Kebijakan privasi
+- [x] Foto mirip / hampir duplikat (perceptual hash)
+- [x] Brankas terkunci (BiometricPrompt)
 - [ ] Pengelompokan wajah (ML Kit Face Detection)
-- [ ] Foto mirip / hampir duplikat (perceptual hash)
-- [ ] Folder terkunci (BiometricPrompt)
-- [ ] Papan tombol pindah/salin ke album
+- [ ] Pindah/salin ke album (MediaStore RELATIVE_PATH)
+- [ ] Enkripsi file Brankas (saat ini hanya disembunyikan dari Galeriva)

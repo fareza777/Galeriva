@@ -11,6 +11,7 @@ import androidx.work.WorkerParameters
 import com.galeriva.app.GalerivaApp
 import com.galeriva.app.data.MediaStoreRepository
 import com.galeriva.app.data.db.IndexedPhotoEntity
+import com.galeriva.app.data.db.PhotoHashEntity
 import com.galeriva.app.data.db.PhotoLabelEntity
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.label.ImageLabeling
@@ -30,6 +31,7 @@ class PhotoIndexWorker(
     override suspend fun doWork(): Result {
         val app = applicationContext as GalerivaApp
         val dao = app.database.photoLabelDao()
+        val hashDao = app.database.photoHashDao()
         val repository = MediaStoreRepository(applicationContext.contentResolver)
 
         val labeler = ImageLabeling.getClient(
@@ -47,6 +49,7 @@ class PhotoIndexWorker(
                 if (isStopped) return Result.success()
                 try {
                     val bitmap = loadDownsampledBitmap(photo.id) ?: continue
+                    hashDao.insert(PhotoHashEntity(photo.id, dHash(bitmap)))
                     val labels = labeler.process(InputImage.fromBitmap(bitmap, 0)).await()
                     bitmap.recycle()
                     if (labels.isNotEmpty()) {
@@ -91,6 +94,33 @@ class PhotoIndexWorker(
         } catch (_: Exception) {
             null
         }
+    }
+
+    /**
+     * 64-bit difference hash: photos that look alike get hashes with a small
+     * Hamming distance, which powers the "similar photos" cleanup tool.
+     */
+    private fun dHash(bitmap: Bitmap): Long {
+        val scaled = Bitmap.createScaledBitmap(bitmap, 9, 8, true)
+        var hash = 0L
+        var bit = 0
+        for (y in 0 until 8) {
+            for (x in 0 until 8) {
+                if (luminance(scaled.getPixel(x, y)) > luminance(scaled.getPixel(x + 1, y))) {
+                    hash = hash or (1L shl bit)
+                }
+                bit++
+            }
+        }
+        if (scaled !== bitmap) scaled.recycle()
+        return hash
+    }
+
+    private fun luminance(pixel: Int): Int {
+        val r = (pixel shr 16) and 0xFF
+        val g = (pixel shr 8) and 0xFF
+        val b = pixel and 0xFF
+        return (299 * r + 587 * g + 114 * b) / 1000
     }
 
     companion object {

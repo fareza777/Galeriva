@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -150,6 +151,9 @@ fun SelectionActionBar(
                 context.startActivity(Intent.createChooser(intent, "Bagikan foto"))
             }) {
                 Icon(Icons.Filled.Share, "Bagikan")
+            }
+            IconButton(onClick = { viewModel.lockSelected() }) {
+                Icon(Icons.Filled.Lock, "Masukkan ke Brankas")
             }
             IconButton(onClick = {
                 viewModel.deletePhotoIds(selected) { sender ->

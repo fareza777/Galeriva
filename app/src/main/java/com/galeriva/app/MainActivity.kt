@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -43,6 +42,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
@@ -52,13 +52,18 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.galeriva.app.ui.GalleryViewModel
 import com.galeriva.app.ui.albums.AlbumsScreen
+import com.galeriva.app.ui.duplicates.DuplicatesScreen
+import com.galeriva.app.ui.duplicates.SimilarScreen
 import com.galeriva.app.ui.gallery.GalleryScreen
 import com.galeriva.app.ui.gallery.PhotoThumbnail
+import com.galeriva.app.ui.vault.VaultScreen
+import com.galeriva.app.ui.vault.authenticateVault
 import com.galeriva.app.ui.search.SearchScreen
 import com.galeriva.app.ui.theme.GalerivaTheme
 import com.galeriva.app.ui.viewer.PhotoViewerScreen
 
-class MainActivity : ComponentActivity() {
+// FragmentActivity is required by BiometricPrompt (vault authentication).
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -126,6 +131,8 @@ private fun GalerivaNavHost() {
     val viewModel: GalleryViewModel = viewModel()
     val photos by viewModel.photos.collectAsStateWithLifecycle()
     val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
+    val lockedPhotos by viewModel.lockedPhotos.collectAsStateWithLifecycle()
+    val activity = LocalContext.current as FragmentActivity
 
     val tabs = listOf(
         Tab("gallery", "Foto") { Icon(Icons.Filled.Photo, null) },
@@ -178,12 +185,31 @@ private fun GalerivaNavHost() {
                 AlbumsScreen(
                     viewModel = viewModel,
                     onAlbumClick = { album -> navController.navigate("album/${album.id}") },
-                    onDuplicatesClick = { navController.navigate("duplicates") }
+                    onDuplicatesClick = { navController.navigate("duplicates") },
+                    onSimilarClick = { navController.navigate("similar") },
+                    onVaultClick = {
+                        authenticateVault(activity) { navController.navigate("vault") }
+                    }
                 )
             }
             composable("duplicates") {
-                com.galeriva.app.ui.duplicates.DuplicatesScreen(
+                DuplicatesScreen(
                     viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable("similar") {
+                SimilarScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable("vault") {
+                VaultScreen(
+                    viewModel = viewModel,
+                    onPhotoClick = { photo ->
+                        navController.navigate("viewer/vault/${photo.id}")
+                    },
                     onBack = { navController.popBackStack() }
                 )
             }
@@ -213,6 +239,7 @@ private fun GalerivaNavHost() {
                 val list = when (source) {
                     "all" -> photos
                     "search" -> searchResults
+                    "vault" -> lockedPhotos
                     else -> viewModel.albumById(source)?.photos ?: photos
                 }
                 PhotoViewerScreen(
