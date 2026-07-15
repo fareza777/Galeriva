@@ -8,6 +8,8 @@
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
+    <!-- Only used once to fetch the offline id->en translation model; photos never leave the device. -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:name=".GalerivaApp"

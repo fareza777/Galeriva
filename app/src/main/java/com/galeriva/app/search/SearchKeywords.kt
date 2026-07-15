@@ -87,16 +87,23 @@ object SearchKeywords {
     )
 
     /**
-     * Expands a raw user query into a set of lowercase label terms.
-     * Words in the dictionary expand to their precise labels; unrecognized
-     * words are kept as-is so direct English label queries still work.
+     * Dictionary-based fallback translation used when the on-device ML Kit
+     * translation model is not (yet) available: replaces known Indonesian
+     * words with their primary English term and keeps the rest as-is.
+     * Returns null when nothing was translated (query is passed through raw).
      */
-    fun expand(query: String): Set<String> {
-        val terms = mutableSetOf<String>()
-        query.lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }.forEach { word ->
-            val mapped = keywordMap[word]
-            if (mapped != null) terms += mapped else terms += word
+    fun toEnglish(query: String): String? {
+        var translatedAny = false
+        val words = query.lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
+        val result = words.joinToString(" ") { word ->
+            val mapped = keywordMap[word]?.firstOrNull()
+            if (mapped != null) {
+                translatedAny = true
+                mapped
+            } else {
+                word
+            }
         }
-        return terms
+        return if (translatedAny) result else null
     }
 }

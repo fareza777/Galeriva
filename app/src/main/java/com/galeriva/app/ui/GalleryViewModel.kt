@@ -8,18 +8,22 @@ import com.galeriva.app.data.MediaStoreRepository
 import com.galeriva.app.data.Photo
 import com.galeriva.app.data.db.FavoriteEntity
 import com.galeriva.app.data.db.LockedPhotoEntity
-import com.galeriva.app.data.db.PhotoLabelEntity
-import com.galeriva.app.search.SearchKeywords
+import com.galeriva.app.semantic.Embeddings
+import com.galeriva.app.semantic.QueryTranslator
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-/** A smart category derived from ML labels. */
+/** A smart category derived from CLIP zero-shot classification. */
 data class SmartAlbum(
     val id: String,
     val title: String,
@@ -35,6 +39,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     private val favoriteDao = app.database.favoriteDao()
     private val hashDao = app.database.photoHashDao()
     private val lockedDao = app.database.lockedPhotoDao()
+    private val embeddingDao = app.database.photoEmbeddingDao()
+    private val translator = QueryTranslator()
 
     private val _allPhotos = MutableStateFlow<List<Photo>>(emptyList())
 
@@ -59,10 +65,10 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     val searchQuery = MutableStateFlow("")
 
-    /** photoId -> labels */
-    val labelsByPhoto: StateFlow<Map<Long, List<PhotoLabelEntity>>> =
-        labelDao.allLabels()
-            .map { rows -> rows.groupBy { it.photoId } }
+    /** photoId -> CLIP embedding (L2-normalized, in memory for fast search). */
+    private val embeddings: StateFlow<Map<Long, FloatArray>> =
+        embeddingDao.all()
+            .map { rows -> rows.associate { it.photoId to Embeddings.fromBytes(it.vector) } }
             .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     val indexedCount: StateFlow<Int> =
@@ -73,33 +79,59 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             .map { it.toSet() }
             .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
+    /**
+     * Semantic search: the query (Indonesian or English) is encoded with CLIP
+     * and matched against photo embeddings by cosine similarity. Both the raw
+     * query and its on-device English translation are tried; the best score
+     * per photo wins. Filename matches rank below semantic matches.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
     val searchResults: StateFlow<List<Photo>> =
-        combine(photos, labelsByPhoto, searchQuery) { photos, labels, query ->
-            if (query.isBlank()) return@combine emptyList()
-            val terms = SearchKeywords.expand(query)
-            val rawWords = query.lowercase()
-                .split(Regex("\\s+"))
-                .filter { it.length >= 4 }
+        combine(
+            photos,
+            embeddings,
+            searchQuery.debounce(350)
+        ) { photoList, embeds, query -> Triple(photoList, embeds, query) }
+            .mapLatest { (photoList, embeds, query) ->
+                if (query.isBlank()) return@mapLatest emptyList()
+                val queryVectors = buildQueryVectors(query)
+                val rawWords = query.lowercase()
+                    .split(Regex("\\s+"))
+                    .filter { it.length >= 4 }
 
-            photos.mapNotNull { photo ->
-                // Label evidence: exact label match with sufficient confidence.
-                val labelScore = labels[photo.id].orEmpty()
-                    .filter { it.label in terms && it.confidence >= LABEL_MATCH_CONFIDENCE }
-                    .maxOfOrNull { it.confidence } ?: 0f
-                // Filename/folder evidence: the user's own words, e.g. "rapat-tim.jpg".
-                val nameMatch = rawWords.any {
-                    photo.name.lowercase().contains(it) ||
-                        photo.bucketName.lowercase().contains(it)
+                photoList.mapNotNull { photo ->
+                    val embedding = embeds[photo.id]
+                    val semantic =
+                        if (embedding != null && queryVectors.isNotEmpty())
+                            queryVectors.maxOf { Embeddings.cosine(it, embedding) }
+                        else 0f
+                    val nameMatch = rawWords.any {
+                        photo.name.lowercase().contains(it) ||
+                            photo.bucketName.lowercase().contains(it)
+                    }
+                    when {
+                        semantic >= SEMANTIC_THRESHOLD -> photo to (1f + semantic)
+                        nameMatch -> photo to 0.5f
+                        else -> null
+                    }
                 }
-                when {
-                    labelScore > 0f -> photo to (1f + labelScore)
-                    nameMatch -> photo to 0.5f
-                    else -> null
-                }
+                    .sortedByDescending { it.second }
+                    .map { it.first }
             }
-                .sortedByDescending { it.second }
-                .map { it.first }
-        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    private suspend fun buildQueryVectors(query: String): List<FloatArray> = buildList {
+        runCatching {
+            app.clipEngine.encodeText(PROMPT_TEMPLATE.format(query))
+        }.getOrNull()?.let(::add)
+
+        val english = translator.toEnglish(query)
+        if (english != null && !english.equals(query, ignoreCase = true)) {
+            runCatching {
+                app.clipEngine.encodeText(PROMPT_TEMPLATE.format(english))
+            }.getOrNull()?.let(::add)
+        }
+    }
 
     /** Folder albums straight from MediaStore buckets. */
     val folderAlbums: StateFlow<List<SmartAlbum>> =
@@ -111,14 +143,21 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 .sortedByDescending { it.photos.size }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    /** Smart albums from ML labels (Orang, Makanan, Dokumen, Alam, ...). */
+    /**
+     * Smart albums via zero-shot CLIP classification: each category is an
+     * English prompt encoded once; photos join the category whose prototype
+     * they are close enough to.
+     */
+    private val categoryPrototypes = MutableStateFlow<Map<String, FloatArray>>(emptyMap())
+
     val smartAlbums: StateFlow<List<SmartAlbum>> =
-        combine(photos, labelsByPhoto) { photos, labels ->
-            SMART_CATEGORIES.mapNotNull { (title, matchLabels) ->
+        combine(photos, embeddings, categoryPrototypes) { photos, embeds, prototypes ->
+            SMART_CATEGORIES.mapNotNull { (title, _) ->
+                val prototype = prototypes[title] ?: return@mapNotNull null
                 val items = photos.filter { photo ->
-                    labels[photo.id].orEmpty().any { row ->
-                        row.label in matchLabels && row.confidence >= LABEL_MATCH_CONFIDENCE
-                    }
+                    embeds[photo.id]?.let {
+                        Embeddings.cosine(it, prototype) >= ALBUM_THRESHOLD
+                    } == true
                 }
                 if (items.isEmpty()) null
                 else SmartAlbum("smart:$title", title, items.first(), items)
@@ -127,6 +166,13 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     init {
         refresh()
+        viewModelScope.launch {
+            runCatching {
+                categoryPrototypes.value = SMART_CATEGORIES.associate { (title, prompt) ->
+                    title to app.clipEngine.encodeText(prompt)
+                }
+            }
+        }
     }
 
     fun refresh() {
@@ -298,17 +344,20 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     companion object {
         private const val SIMILARITY_THRESHOLD_BITS = 6
-        private const val LABEL_MATCH_CONFIDENCE = 0.65f
+        private const val SEMANTIC_THRESHOLD = 0.23f
+        private const val ALBUM_THRESHOLD = 0.24f
+        private const val PROMPT_TEMPLATE = "a photo of %s"
 
-        private val SMART_CATEGORIES: List<Pair<String, Set<String>>> = listOf(
-            "Rapat & Kerja" to setOf("meeting", "whiteboard", "presentation", "conference", "seminar", "conference room", "office", "classroom", "lecture"),
-            "Orang" to setOf("person", "people", "selfie", "smile", "crowd", "face"),
-            "Makanan & Minuman" to setOf("food", "dish", "cuisine", "dessert", "drink", "coffee", "fruit", "cake", "snack", "salad"),
-            "Alam & Pemandangan" to setOf("landscape", "mountain", "beach", "sea", "sky", "sunset", "nature", "tree", "flower", "waterfall", "lake"),
-            "Hewan" to setOf("animal", "cat", "dog", "bird", "pet", "fish", "butterfly", "horse"),
-            "Kendaraan" to setOf("car", "motorcycle", "vehicle", "bicycle", "airplane", "boat", "train"),
-            "Dokumen & Teks" to setOf("paper", "document", "text", "receipt", "handwriting", "menu"),
-            "Kota & Bangunan" to setOf("building", "city", "architecture", "street", "skyscraper", "bridge", "tower")
+        /** Category title -> English prompt for zero-shot classification. */
+        private val SMART_CATEGORIES: List<Pair<String, String>> = listOf(
+            "Rapat & Kerja" to "a photo of a business meeting, presentation, or people working in an office",
+            "Orang" to "a photo of a person or a group of people",
+            "Makanan & Minuman" to "a photo of food or drinks",
+            "Alam & Pemandangan" to "a photo of nature or a scenic landscape",
+            "Hewan" to "a photo of an animal or pet",
+            "Kendaraan" to "a photo of a car, motorcycle, or other vehicle",
+            "Dokumen & Teks" to "a photo of a document, receipt, or printed text",
+            "Kota & Bangunan" to "a photo of buildings, architecture, or a city street"
         )
     }
 }

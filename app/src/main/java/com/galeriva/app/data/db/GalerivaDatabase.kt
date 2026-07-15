@@ -40,6 +40,12 @@ data class LockedPhotoEntity(
     @PrimaryKey val photoId: Long
 )
 
+@Entity(tableName = "photo_embeddings")
+data class PhotoEmbeddingEntity(
+    @PrimaryKey val photoId: Long,
+    val vector: ByteArray
+)
+
 @Dao
 interface PhotoLabelDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -83,6 +89,15 @@ interface PhotoHashDao {
 }
 
 @Dao
+interface PhotoEmbeddingDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(embedding: PhotoEmbeddingEntity)
+
+    @Query("SELECT * FROM photo_embeddings")
+    fun all(): Flow<List<PhotoEmbeddingEntity>>
+}
+
+@Dao
 interface LockedPhotoDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun lock(entities: List<LockedPhotoEntity>)
@@ -100,9 +115,10 @@ interface LockedPhotoDao {
         IndexedPhotoEntity::class,
         FavoriteEntity::class,
         PhotoHashEntity::class,
-        LockedPhotoEntity::class
+        LockedPhotoEntity::class,
+        PhotoEmbeddingEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class GalerivaDatabase : RoomDatabase() {
@@ -110,6 +126,7 @@ abstract class GalerivaDatabase : RoomDatabase() {
     abstract fun favoriteDao(): FavoriteDao
     abstract fun photoHashDao(): PhotoHashDao
     abstract fun lockedPhotoDao(): LockedPhotoDao
+    abstract fun photoEmbeddingDao(): PhotoEmbeddingDao
 
     companion object {
         fun create(context: Context): GalerivaDatabase =

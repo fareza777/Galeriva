@@ -11,16 +11,13 @@ import androidx.work.WorkerParameters
 import com.galeriva.app.GalerivaApp
 import com.galeriva.app.data.MediaStoreRepository
 import com.galeriva.app.data.db.IndexedPhotoEntity
+import com.galeriva.app.data.db.PhotoEmbeddingEntity
 import com.galeriva.app.data.db.PhotoHashEntity
-import com.galeriva.app.data.db.PhotoLabelEntity
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.label.ImageLabeling
-import com.google.mlkit.vision.label.defaults.ImageLabelerOptions
-import kotlinx.coroutines.tasks.await
+import com.galeriva.app.semantic.Embeddings
 
 /**
- * Indexes photos in the background with on-device ML Kit image labeling.
- * Labels are stored locally in Room and power search + smart albums.
+ * Indexes photos in the background: computes a CLIP embedding (semantic
+ * search + smart albums) and a dHash (similar-photo detection) per photo.
  * Everything runs offline — no photo ever leaves the device.
  */
 class PhotoIndexWorker(
@@ -32,41 +29,30 @@ class PhotoIndexWorker(
         val app = applicationContext as GalerivaApp
         val dao = app.database.photoLabelDao()
         val hashDao = app.database.photoHashDao()
+        val embeddingDao = app.database.photoEmbeddingDao()
         val repository = MediaStoreRepository(applicationContext.contentResolver)
 
-        val labeler = ImageLabeling.getClient(
-            ImageLabelerOptions.Builder()
-                .setConfidenceThreshold(MIN_CONFIDENCE)
-                .build()
-        )
+        val allPhotos = repository.loadAllPhotos()
+        val indexed = dao.indexedPhotoIds().toHashSet()
+        val pending = allPhotos.filter { it.id !in indexed }
 
-        try {
-            val allPhotos = repository.loadAllPhotos()
-            val indexed = dao.indexedPhotoIds().toHashSet()
-            val pending = allPhotos.filter { it.id !in indexed }
-
-            for (photo in pending) {
-                if (isStopped) return Result.success()
-                try {
-                    val bitmap = loadDownsampledBitmap(photo.id) ?: continue
-                    hashDao.insert(PhotoHashEntity(photo.id, dHash(bitmap)))
-                    val labels = labeler.process(InputImage.fromBitmap(bitmap, 0)).await()
-                    bitmap.recycle()
-                    if (labels.isNotEmpty()) {
-                        dao.insertLabels(labels.map {
-                            PhotoLabelEntity(photo.id, it.text.lowercase(), it.confidence)
-                        })
-                    }
-                } catch (_: Exception) {
-                    // Skip unreadable/corrupt images; still mark as indexed below
-                } finally {
-                    dao.markIndexed(IndexedPhotoEntity(photo.id))
-                }
+        for (photo in pending) {
+            if (isStopped) return Result.success()
+            try {
+                val bitmap = loadDownsampledBitmap(photo.id) ?: continue
+                hashDao.insert(PhotoHashEntity(photo.id, dHash(bitmap)))
+                val embedding = app.clipEngine.encodeImage(bitmap)
+                bitmap.recycle()
+                embeddingDao.insert(
+                    PhotoEmbeddingEntity(photo.id, Embeddings.toBytes(embedding))
+                )
+            } catch (_: Exception) {
+                // Skip unreadable/corrupt images; still mark as indexed below
+            } finally {
+                dao.markIndexed(IndexedPhotoEntity(photo.id))
             }
-            return Result.success()
-        } finally {
-            labeler.close()
         }
+        return Result.success()
     }
 
     private fun loadDownsampledBitmap(photoId: Long): Bitmap? {
@@ -125,7 +111,6 @@ class PhotoIndexWorker(
 
     companion object {
         const val WORK_NAME = "galeriva_photo_indexing"
-        private const val MIN_CONFIDENCE = 0.6f
         private const val TARGET_SIZE = 640
     }
 }

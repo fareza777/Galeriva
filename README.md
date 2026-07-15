@@ -5,9 +5,9 @@ Aplikasi galeri foto Android premium dengan pengelolaan pintar **100% on-device*
 ## Fitur
 
 - **Galeri** — grid foto dikelompokkan per hari (bahasa Indonesia), tampilan Material 3 dengan dynamic color (Android 12+) dan dark mode.
-- **Pengindeksan otomatis** — ML Kit Image Labeling berjalan di latar belakang (WorkManager) dan menandai setiap foto (meeting, food, beach, document, dll). Hasil disimpan lokal di Room.
-- **Pencarian bahasa Indonesia** — ketik "rapat" dan semua foto rapat/whiteboard/presentasi muncul. Kamus kata kunci ID→EN ada di `SearchKeywords.kt`.
-- **Album pintar** — kategori otomatis: Rapat & Kerja, Orang, Makanan, Alam, Hewan, Kendaraan, Dokumen, Kota.
+- **Pencarian semantik CLIP (seperti Google Photos)** — setiap foto diubah menjadi vektor 512-dimensi oleh CLIP ViT-B/32 (ONNX int8, on-device). Query bebas berbahasa Indonesia ("rapat di kantor", "anak bermain di pantai") diterjemahkan on-device (ML Kit Translate, fallback kamus) lalu dicocokkan dengan cosine similarity. Tanpa server, tanpa kamus label.
+- **Pengindeksan otomatis** — WorkManager menghitung embedding CLIP + dHash per foto di latar belakang; hasil disimpan lokal di Room.
+- **Album pintar zero-shot** — kategori (Rapat & Kerja, Orang, Makanan, Alam, Hewan, Kendaraan, Dokumen, Kota) diklasifikasikan langsung dari embedding, tanpa model tambahan.
 - **Album folder** — folder asli perangkat dari MediaStore.
 - **Viewer** — swipe antar foto, pinch-to-zoom, favorit, bagikan, hapus.
 - **Multi-select** — tekan-lama foto di galeri untuk memilih banyak, lalu hapus atau bagikan sekaligus (dialog konfirmasi sistem Android).
@@ -17,9 +17,10 @@ Aplikasi galeri foto Android premium dengan pengelolaan pintar **100% on-device*
 
 ## Teknologi
 
-Kotlin • Jetpack Compose (Material 3) • Room • WorkManager • ML Kit Image Labeling (offline) • Coil • Navigation Compose
+Kotlin • Jetpack Compose (Material 3) • Room • WorkManager • ONNX Runtime + CLIP ViT-B/32 (offline) • ML Kit Translate • Coil • Navigation Compose
 
 - `minSdk 26` (Android 8.0) • `targetSdk 35`
+- File model CLIP (~154 MB) **tidak di-commit** — Gradle mengunduhnya otomatis dari HuggingFace ke `app/src/main/assets/models/` saat build pertama (task `downloadClipModels`).
 
 ## Build
 

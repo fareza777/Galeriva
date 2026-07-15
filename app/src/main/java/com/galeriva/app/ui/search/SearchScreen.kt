@@ -29,7 +29,8 @@ import com.galeriva.app.ui.GalleryViewModel
 import com.galeriva.app.ui.gallery.PhotoThumbnail
 
 private val SUGGESTIONS = listOf(
-    "rapat", "makanan", "pantai", "dokumen", "selfie", "kucing", "gunung", "kota", "bunga"
+    "rapat di kantor", "makanan", "pantai saat senja", "dokumen", "selfie",
+    "kucing", "gunung", "ulang tahun", "orang tersenyum"
 )
 
 @Composable
@@ -47,7 +48,7 @@ fun SearchScreen(
         OutlinedTextField(
             value = query,
             onValueChange = { viewModel.searchQuery.value = it },
-            placeholder = { Text("Cari: rapat, makanan, pantai…") },
+            placeholder = { Text("Cari apa saja: \"rapat di kantor\", \"pantai\"…") },
             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
             singleLine = true,
             modifier = Modifier
@@ -70,11 +71,17 @@ fun SearchScreen(
         when {
             query.isBlank() -> CenteredHint(
                 if (indexedCount < totalPhotos.size)
-                    "Ketik kata kunci untuk mencari.\nIndeks pintar: $indexedCount/${totalPhotos.size} foto."
+                    "Tulis apa yang Anda ingat dari fotonya — AI memahami kalimat utuh.\n" +
+                        "Indeks pintar: $indexedCount/${totalPhotos.size} foto."
                 else
-                    "Ketik kata kunci, misalnya \"rapat\" atau \"makanan\"."
+                    "Tulis apa yang Anda ingat dari fotonya, misalnya\n\"rapat di kantor\" atau \"anak bermain di pantai\"."
             )
-            results.isEmpty() -> CenteredHint("Tidak ada hasil untuk \"$query\".")
+            results.isEmpty() -> CenteredHint(
+                if (indexedCount < totalPhotos.size)
+                    "Tidak ada hasil untuk \"$query\".\nIndeks masih berjalan ($indexedCount/${totalPhotos.size} foto) — coba lagi nanti."
+                else
+                    "Tidak ada hasil untuk \"$query\"."
+            )
             else -> {
                 Text(
                     "${results.size} foto ditemukan",

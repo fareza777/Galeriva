@@ -58,6 +58,48 @@ android {
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
+    androidResources {
+        noCompress += "onnx"
+    }
+}
+
+// CLIP model files are large; they are fetched at build time into assets
+// (git-ignored) instead of being committed to the repo.
+val modelAssetsDir = file("src/main/assets/models")
+val modelDownloads = mapOf(
+    "clip_vision_q8.onnx" to
+        "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model_quantized.onnx",
+    "clip_text_q8.onnx" to
+        "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/text_model_quantized.onnx",
+    "clip_vocab.json" to
+        "https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/vocab.json",
+    "clip_merges.txt" to
+        "https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/merges.txt"
+)
+
+val downloadClipModels by tasks.registering {
+    outputs.dir(modelAssetsDir)
+    doLast {
+        modelAssetsDir.mkdirs()
+        modelDownloads.forEach { (fileName, url) ->
+            val target = modelAssetsDir.resolve(fileName)
+            if (!target.exists() || target.length() == 0L) {
+                logger.lifecycle("Downloading $fileName ...")
+                val tmp = modelAssetsDir.resolve("$fileName.part")
+                java.net.URI(url).toURL().openStream().use { input ->
+                    tmp.outputStream().use { output -> input.copyTo(output) }
+                }
+                if (!tmp.renameTo(target)) {
+                    tmp.copyTo(target, overwrite = true)
+                    tmp.delete()
+                }
+            }
+        }
+    }
+}
+
+tasks.named("preBuild") {
+    dependsOn(downloadClipModels)
 }
 
 dependencies {
@@ -89,8 +131,10 @@ dependencies {
     // Vault authentication (biometric / device credential)
     implementation("androidx.biometric:biometric:1.1.0")
 
-    // On-device ML: image labeling (bundled model, works offline)
-    implementation("com.google.mlkit:image-labeling:17.0.9")
+    // On-device semantic search: CLIP via ONNX Runtime (works offline)
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.19.2")
+    // On-device Indonesian -> English query translation
+    implementation("com.google.mlkit:translate:17.0.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
 
     testImplementation("junit:junit:4.13.2")
