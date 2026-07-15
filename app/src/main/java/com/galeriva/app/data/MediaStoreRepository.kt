@@ -83,8 +83,10 @@ class MediaStoreRepository(private val contentResolver: ContentResolver) {
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idCol)
-                val taken = cursor.getLong(takenCol).takeIf { it > 0 }
-                    ?: (cursor.getLong(addedCol) * 1000)
+                val taken = normalizeTakenMillis(
+                    cursor.getLong(takenCol),
+                    cursor.getLong(addedCol)
+                )
                 photos += Photo(
                     id = id,
                     uri = ContentUris.withAppendedId(
@@ -99,6 +101,20 @@ class MediaStoreRepository(private val contentResolver: ContentResolver) {
                 )
             }
         }
-        photos
+        // Re-sort in memory: DATE_TAKEN normalization may reorder rows
+        // relative to the SQL sort (some vendors store seconds, not millis).
+        photos.sortedByDescending { it.dateTakenMillis }
+    }
+
+    /**
+     * DATE_TAKEN should be epoch millis, but some camera/chat apps store
+     * seconds — which would sort those photos into 1970 and make them
+     * "disappear" from the top of the gallery. Values below ~1973 in millis
+     * are treated as seconds; zero/negative falls back to DATE_ADDED.
+     */
+    private fun normalizeTakenMillis(takenRaw: Long, addedSeconds: Long): Long = when {
+        takenRaw <= 0L -> addedSeconds * 1000
+        takenRaw < 100_000_000_000L -> takenRaw * 1000
+        else -> takenRaw
     }
 }

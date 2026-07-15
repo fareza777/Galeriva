@@ -46,10 +46,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -87,7 +84,7 @@ fun GalleryScreen(
 
     val grouped = remember(photos) { groupByDay(photos) }
     val selectionMode = selected.isNotEmpty()
-    var collapsedDays by rememberSaveable { mutableStateOf(listOf<String>()) }
+    val collapsedDays by viewModel.collapsedDays.collectAsStateWithLifecycle()
 
     Column(Modifier.fillMaxSize()) {
         if (selectionMode) {
@@ -112,11 +109,7 @@ fun GalleryScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
-                            .clickable {
-                                collapsedDays =
-                                    if (isCollapsed) collapsedDays - dayLabel
-                                    else collapsedDays + dayLabel
-                            }
+                            .clickable { viewModel.toggleDayCollapsed(dayLabel) }
                             .padding(horizontal = 10.dp, vertical = 14.dp)
                     ) {
                         Box(

@@ -24,4 +24,20 @@ object Embeddings {
         for (i in 0 until n) sum += a[i] * b[i]
         return sum
     }
+
+    /** Average of several normalized vectors, re-normalized (prompt ensembling). */
+    fun meanNormalized(vectors: List<FloatArray>): FloatArray? {
+        if (vectors.isEmpty()) return null
+        val dim = vectors.first().size
+        val mean = FloatArray(dim)
+        for (vector in vectors) {
+            for (i in 0 until dim) mean[i] += vector[i]
+        }
+        var norm = 0f
+        for (v in mean) norm += v * v
+        val scale = kotlin.math.sqrt(norm)
+        if (scale == 0f) return null
+        for (i in mean.indices) mean[i] /= scale
+        return mean
+    }
 }

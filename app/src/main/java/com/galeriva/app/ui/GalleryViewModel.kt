@@ -49,6 +49,23 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     private val lockedDao = app.database.lockedPhotoDao()
     private val embeddingDao = app.database.photoEmbeddingDao()
     private val translator = QueryTranslator()
+    private val prefs =
+        application.getSharedPreferences("galeriva_ui", android.content.Context.MODE_PRIVATE)
+
+    /** Auto-reload when MediaStore changes (new photo, deletion by other apps). */
+    private var pendingRefresh: kotlinx.coroutines.Job? = null
+    private val mediaObserver = object : android.database.ContentObserver(
+        android.os.Handler(android.os.Looper.getMainLooper())
+    ) {
+        override fun onChange(selfChange: Boolean) {
+            pendingRefresh?.cancel()
+            pendingRefresh = viewModelScope.launch {
+                kotlinx.coroutines.delay(1_500)
+                reloadPhotos()
+                app.scheduleIndexing()
+            }
+        }
+    }
 
     private val _allPhotos = MutableStateFlow<List<Photo>>(emptyList())
 
@@ -172,9 +189,12 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     private suspend fun buildQueryVector(query: String): FloatArray? {
         val english = translator.toEnglish(query)?.takeIf { it.isNotBlank() }
         val text = english ?: query
-        return runCatching {
-            app.clipEngine.encodeText(PROMPT_TEMPLATE.format(text))
-        }.getOrNull()
+        // Prompt ensembling: encode several phrasings and average them —
+        // a standard trick that measurably improves CLIP retrieval accuracy.
+        val vectors = PROMPT_TEMPLATES.mapNotNull { template ->
+            runCatching { app.clipEngine.encodeText(template.format(text)) }.getOrNull()
+        }
+        return Embeddings.meanNormalized(vectors)
     }
 
     /** Folder albums straight from MediaStore buckets. */
@@ -210,6 +230,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     init {
         refresh()
+        app.contentResolver.registerContentObserver(
+            android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            true,
+            mediaObserver
+        )
         viewModelScope.launch {
             runCatching {
                 categoryPrototypes.value = SMART_CATEGORIES.associate { (title, prompt) ->
@@ -225,10 +250,32 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     fun refresh() {
         viewModelScope.launch {
             _isLoading.value = true
-            _allPhotos.value = repository.loadAllPhotos()
+            reloadPhotos()
             _isLoading.value = false
             app.scheduleIndexing()
         }
+    }
+
+    private suspend fun reloadPhotos() {
+        _allPhotos.value = repository.loadAllPhotos()
+    }
+
+    override fun onCleared() {
+        app.contentResolver.unregisterContentObserver(mediaObserver)
+    }
+
+    // ----- Collapsed day groups (persisted across sessions) -----
+
+    val collapsedDays = MutableStateFlow(
+        prefs.getStringSet("collapsed_days", emptySet()).orEmpty().toSet()
+    )
+
+    fun toggleDayCollapsed(dayLabel: String) {
+        val next =
+            if (dayLabel in collapsedDays.value) collapsedDays.value - dayLabel
+            else collapsedDays.value + dayLabel
+        collapsedDays.value = next
+        prefs.edit().putStringSet("collapsed_days", next).apply()
     }
 
     // ----- Multi-select -----
@@ -425,10 +472,16 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             "a photo of food on a plate",
             "a scenic landscape photo",
             "a photo of an animal",
-            "a photo of a product on a plain background"
+            "a photo of a product on a plain background",
+            "a screenshot of a chat conversation with text messages",
+            "a certificate, poster, or flyer with printed text"
         )
         private const val ALBUM_THRESHOLD = 0.24f
-        private const val PROMPT_TEMPLATE = "a photo of %s"
+        private val PROMPT_TEMPLATES = listOf(
+            "a photo of %s",
+            "a picture showing %s",
+            "%s"
+        )
 
         /** Category title -> English prompt for zero-shot classification. */
         private val SMART_CATEGORIES: List<Pair<String, String>> = listOf(
