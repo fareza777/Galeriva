@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.galeriva.app.GalerivaApp
 import com.galeriva.app.data.MediaStoreRepository
 import com.galeriva.app.data.Photo
+import com.galeriva.app.data.AlbumExporter
 import com.galeriva.app.data.db.FavoriteEntity
 import com.galeriva.app.data.db.LockedPhotoEntity
 import com.galeriva.app.semantic.Embeddings
@@ -22,6 +23,13 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
+private data class SearchInputs(
+    val photos: List<Photo>,
+    val embeddings: Map<Long, FloatArray>,
+    val distractors: Map<Long, Float>,
+    val query: String
+)
 
 /** A smart category derived from CLIP zero-shot classification. */
 data class SmartAlbum(
@@ -90,22 +98,29 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         combine(
             photos,
             embeddings,
+            distractorScores,
             searchQuery.debounce(350)
-        ) { photoList, embeds, query -> Triple(photoList, embeds, query) }
-            .mapLatest { (photoList, embeds, query) ->
+        ) { photoList, embeds, distractors, query ->
+            SearchInputs(photoList, embeds, distractors, query)
+        }
+            .mapLatest { (photoList, embeds, distractors, query) ->
                 if (query.isBlank()) return@mapLatest emptyList()
                 val queryVector = buildQueryVector(query)
                 val rawWords = query.lowercase()
                     .split(Regex("\\s+"))
                     .filter { it.length >= 4 }
 
-                // Pass 1: semantic scores above the absolute floor.
+                // Pass 1: semantic scores above the absolute floor AND beating
+                // the photo's best distractor (contrastive zero-shot check).
                 val semanticScores = HashMap<Long, Float>()
                 if (queryVector != null) {
                     for (photo in photoList) {
                         val embedding = embeds[photo.id] ?: continue
                         val score = Embeddings.cosine(queryVector, embedding)
-                        if (score >= SEMANTIC_THRESHOLD) semanticScores[photo.id] = score
+                        if (score < SEMANTIC_THRESHOLD) continue
+                        val distractor = distractors[photo.id] ?: 0f
+                        if (score + DISTRACTOR_MARGIN < distractor) continue
+                        semanticScores[photo.id] = score
                     }
                 }
                 // Pass 2: relative cutoff — drop the weak tail far below the
@@ -162,6 +177,23 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      */
     private val categoryPrototypes = MutableStateFlow<Map<String, FloatArray>>(emptyMap())
 
+    /**
+     * Contrastive guard: prototypes of common "false friend" photo types.
+     * A photo only counts as a search hit if the query beats its best
+     * distractor score — this is what keeps ID photos, QR codes, and
+     * screenshots out of "meeting" results.
+     */
+    private val distractorPrototypes = MutableStateFlow<List<FloatArray>>(emptyList())
+
+    /** photoId -> best distractor score (query-independent, computed once). */
+    private val distractorScores: StateFlow<Map<Long, Float>> =
+        combine(embeddings, distractorPrototypes) { embeds, distractors ->
+            if (distractors.isEmpty()) emptyMap()
+            else embeds.mapValues { (_, embedding) ->
+                distractors.maxOf { Embeddings.cosine(it, embedding) }
+            }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
     val smartAlbums: StateFlow<List<SmartAlbum>> =
         combine(photos, embeddings, categoryPrototypes) { photos, embeds, prototypes ->
             SMART_CATEGORIES.mapNotNull { (title, _) ->
@@ -182,6 +214,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             runCatching {
                 categoryPrototypes.value = SMART_CATEGORIES.associate { (title, prompt) ->
                     title to app.clipEngine.encodeText(prompt)
+                }
+                distractorPrototypes.value = DISTRACTOR_PROMPTS.map {
+                    app.clipEngine.encodeText(it)
                 }
             }
         }
@@ -344,6 +379,27 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    // ----- Album export (ZIP) -----
+
+    /** (done, total) while an export is running, null when idle. */
+    val exportProgress = MutableStateFlow<Pair<Int, Int>?>(null)
+
+    fun exportAlbum(album: SmartAlbum, onDone: (java.io.File) -> Unit) {
+        if (exportProgress.value != null) return
+        viewModelScope.launch {
+            try {
+                val file = AlbumExporter.exportToZip(app, album) { done, total ->
+                    exportProgress.value = done to total
+                }
+                onDone(file)
+            } catch (_: Exception) {
+                // Export failed (out of space / unreadable photos) — reset quietly.
+            } finally {
+                exportProgress.value = null
+            }
+        }
+    }
+
     fun toggleFavorite(photoId: Long) {
         viewModelScope.launch {
             if (photoId in favoriteIds.value) favoriteDao.remove(photoId)
@@ -358,6 +414,19 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         private const val SIMILARITY_THRESHOLD_BITS = 6
         private const val SEMANTIC_THRESHOLD = 0.24f
         private const val RELATIVE_MARGIN = 0.05f
+        private const val DISTRACTOR_MARGIN = 0.015f
+
+        private val DISTRACTOR_PROMPTS = listOf(
+            "a passport-style ID photo of a face on a plain background",
+            "a QR code or barcode",
+            "a screenshot of a phone or computer screen",
+            "a photo of a document, form, or receipt",
+            "a close-up selfie portrait",
+            "a photo of food on a plate",
+            "a scenic landscape photo",
+            "a photo of an animal",
+            "a photo of a product on a plain background"
+        )
         private const val ALBUM_THRESHOLD = 0.24f
         private const val PROMPT_TEMPLATE = "a photo of %s"
 

@@ -10,6 +10,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -44,7 +46,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -82,6 +87,7 @@ fun GalleryScreen(
 
     val grouped = remember(photos) { groupByDay(photos) }
     val selectionMode = selected.isNotEmpty()
+    var collapsedDays by rememberSaveable { mutableStateOf(listOf<String>()) }
 
     Column(Modifier.fillMaxSize()) {
         if (selectionMode) {
@@ -95,10 +101,23 @@ fun GalleryScreen(
             modifier = Modifier.fillMaxSize()
         ) {
             grouped.forEach { (dayLabel, dayPhotos) ->
+                val isCollapsed = dayLabel in collapsedDays
                 item(key = "header-$dayLabel", span = { GridItemSpan(maxLineSpan) }) {
+                    val chevronRotation by animateFloatAsState(
+                        targetValue = if (isCollapsed) -90f else 0f,
+                        label = "chevron"
+                    )
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 14.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable {
+                                collapsedDays =
+                                    if (isCollapsed) collapsedDays - dayLabel
+                                    else collapsedDays + dayLabel
+                            }
+                            .padding(horizontal = 10.dp, vertical = 14.dp)
                     ) {
                         Box(
                             Modifier
@@ -108,21 +127,41 @@ fun GalleryScreen(
                         Text(
                             text = dayLabel,
                             style = MaterialTheme.typography.titleLarge,
-                            modifier = Modifier.padding(start = 10.dp)
+                            modifier = Modifier
+                                .padding(start = 10.dp)
+                                .weight(1f)
+                        )
+                        Text(
+                            "${dayPhotos.size}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Icon(
+                            Icons.Rounded.ExpandMore,
+                            contentDescription = if (isCollapsed) "Buka" else "Tutup",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .padding(start = 6.dp)
+                                .size(22.dp)
+                                .graphicsLayer(rotationZ = chevronRotation)
                         )
                     }
                 }
-                items(dayPhotos, key = { it.id }) { photo ->
-                    PhotoThumbnail(
-                        photo = photo,
-                        isFavorite = photo.id in favorites,
-                        isSelected = photo.id in selected,
-                        onClick = {
-                            if (selectionMode) viewModel.toggleSelection(photo.id)
-                            else onPhotoClick(photo)
-                        },
-                        onLongClick = { viewModel.toggleSelection(photo.id) }
-                    )
+                if (!isCollapsed) {
+                    items(dayPhotos, key = { it.id }) { photo ->
+                        Box(Modifier.animateItem()) {
+                            PhotoThumbnail(
+                                photo = photo,
+                                isFavorite = photo.id in favorites,
+                                isSelected = photo.id in selected,
+                                onClick = {
+                                    if (selectionMode) viewModel.toggleSelection(photo.id)
+                                    else onPhotoClick(photo)
+                                },
+                                onLongClick = { viewModel.toggleSelection(photo.id) }
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -142,7 +181,12 @@ fun SelectionActionBar(
         if (result.resultCode == Activity.RESULT_OK) viewModel.onDeleteConfirmed()
     }
 
-    Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = RoundedCornerShape(26.dp),
+        shadowElevation = 8.dp,
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
         Row(
             Modifier
                 .fillMaxWidth()

@@ -41,26 +41,33 @@ fun GalerivaWordmark(modifier: Modifier = Modifier) {
     )
 }
 
-/** Large screen header: wordmark + contextual subtitle. */
+/** Large screen header: wordmark + contextual subtitle + optional actions. */
 @Composable
-fun GalerivaHeader(subtitle: String?) {
-    Column(
+fun GalerivaHeader(
+    subtitle: String?,
+    actions: @Composable () -> Unit = {}
+) {
+    Row(
         Modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 6.dp)
+            .padding(start = 20.dp, end = 12.dp, top = 14.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        GalerivaWordmark()
-        if (subtitle != null) {
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 2.dp)
-            )
+        Column(Modifier.weight(1f)) {
+            GalerivaWordmark()
+            if (subtitle != null) {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
         }
+        actions()
     }
 }
 

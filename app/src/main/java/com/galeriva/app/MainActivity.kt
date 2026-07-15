@@ -30,9 +30,12 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.rounded.Archive
+import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Photo
 import androidx.compose.material.icons.rounded.PhotoAlbum
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -56,6 +59,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -65,7 +69,11 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.galeriva.app.ui.GalleryViewModel
+import com.galeriva.app.data.AlbumExporter
 import com.galeriva.app.ui.albums.AlbumsScreen
+import com.galeriva.app.ui.calendar.CalendarScreen
+import com.galeriva.app.ui.calendar.DayScreen
+import com.galeriva.app.ui.calendar.localDate
 import com.galeriva.app.ui.components.FloatingNavBar
 import com.galeriva.app.ui.components.GalerivaHeader
 import com.galeriva.app.ui.components.NavTab
@@ -82,6 +90,7 @@ import com.galeriva.app.ui.viewer.PhotoViewerScreen
 // FragmentActivity is required by BiometricPrompt (vault authentication).
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
@@ -242,6 +251,24 @@ private fun GalerivaShell() {
                         "albums" -> "Album pintar & alat perapih"
                         "search" -> "Pencarian AI — semua di perangkat"
                         else -> null
+                    },
+                    actions = {
+                        if (currentRoute == "gallery") {
+                            IconButton(onClick = { viewModel.refresh() }) {
+                                Icon(
+                                    Icons.Rounded.Sync,
+                                    contentDescription = "Pindai foto baru",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            IconButton(onClick = { navController.navigate("calendar") }) {
+                                Icon(
+                                    Icons.Rounded.CalendarMonth,
+                                    contentDescription = "Kalender",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
                     }
                 )
             }
@@ -281,6 +308,27 @@ private fun GalerivaShell() {
                 composable("similar") {
                     SimilarScreen(viewModel) { navController.popBackStack() }
                 }
+                composable("calendar") {
+                    CalendarScreen(
+                        viewModel = viewModel,
+                        onDayClick = { date ->
+                            navController.navigate("day/${date.toEpochDay()}")
+                        },
+                        onBack = { navController.popBackStack() }
+                    )
+                }
+                composable("day/{epochDay}") { entry ->
+                    val epochDay = entry.arguments?.getString("epochDay")?.toLongOrNull()
+                        ?: return@composable
+                    DayScreen(
+                        viewModel = viewModel,
+                        epochDay = epochDay,
+                        onPhotoClick = { photo ->
+                            navController.navigate("viewer/day-$epochDay/${photo.id}")
+                        },
+                        onBack = { navController.popBackStack() }
+                    )
+                }
                 composable("vault") {
                     VaultScreen(
                         viewModel = viewModel,
@@ -308,10 +356,15 @@ private fun GalerivaShell() {
                     val source = entry.arguments?.getString("source") ?: "all"
                     val photoId = entry.arguments?.getString("photoId")?.toLongOrNull()
                         ?: return@composable
-                    val list = when (source) {
-                        "all" -> photos
-                        "search" -> searchResults
-                        "vault" -> lockedPhotos
+                    val list = when {
+                        source == "all" -> photos
+                        source == "search" -> searchResults
+                        source == "vault" -> lockedPhotos
+                        source.startsWith("day-") -> {
+                            val day = source.removePrefix("day-").toLongOrNull()
+                            if (day == null) photos
+                            else photos.filter { it.localDate().toEpochDay() == day }
+                        }
                         else -> viewModel.albumById(source)?.photos ?: photos
                     }
                     PhotoViewerScreen(
@@ -353,6 +406,8 @@ private fun AlbumDetailScreen(
     onPhotoClick: (com.galeriva.app.data.Photo) -> Unit
 ) {
     val favorites by viewModel.favoriteIds.collectAsStateWithLifecycle()
+    val exportProgress by viewModel.exportProgress.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     Scaffold(
         topBar = {
             TopAppBar(
@@ -360,6 +415,29 @@ private fun AlbumDetailScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Kembali")
+                    }
+                },
+                actions = {
+                    val progress = exportProgress
+                    if (progress != null) {
+                        Text(
+                            "${progress.first}/${progress.second}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(end = 12.dp)
+                        )
+                    } else {
+                        IconButton(onClick = {
+                            viewModel.exportAlbum(album) { file ->
+                                AlbumExporter.share(context, file)
+                            }
+                        }) {
+                            Icon(
+                                Icons.Rounded.Archive,
+                                contentDescription = "Ekspor album sebagai ZIP",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
