@@ -79,6 +79,23 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             .map { rows -> rows.associate { it.photoId to Embeddings.fromBytes(it.vector) } }
             .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
+    /**
+     * Contrastive guard: prototypes of common "false friend" photo types.
+     * A photo only counts as a search hit if the query beats its best
+     * distractor score — this is what keeps ID photos, QR codes, and
+     * screenshots out of "meeting" results.
+     */
+    private val distractorPrototypes = MutableStateFlow<List<FloatArray>>(emptyList())
+
+    /** photoId -> best distractor score (query-independent, computed once). */
+    private val distractorScores: StateFlow<Map<Long, Float>> =
+        combine(embeddings, distractorPrototypes) { embeds, distractors ->
+            if (distractors.isEmpty()) emptyMap()
+            else embeds.mapValues { (_, embedding) ->
+                distractors.maxOf { Embeddings.cosine(it, embedding) }
+            }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
     val indexedCount: StateFlow<Int> =
         labelDao.indexedCount().stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
@@ -176,23 +193,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      * they are close enough to.
      */
     private val categoryPrototypes = MutableStateFlow<Map<String, FloatArray>>(emptyMap())
-
-    /**
-     * Contrastive guard: prototypes of common "false friend" photo types.
-     * A photo only counts as a search hit if the query beats its best
-     * distractor score — this is what keeps ID photos, QR codes, and
-     * screenshots out of "meeting" results.
-     */
-    private val distractorPrototypes = MutableStateFlow<List<FloatArray>>(emptyList())
-
-    /** photoId -> best distractor score (query-independent, computed once). */
-    private val distractorScores: StateFlow<Map<Long, Float>> =
-        combine(embeddings, distractorPrototypes) { embeds, distractors ->
-            if (distractors.isEmpty()) emptyMap()
-            else embeds.mapValues { (_, embedding) ->
-                distractors.maxOf { Embeddings.cosine(it, embedding) }
-            }
-        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     val smartAlbums: StateFlow<List<SmartAlbum>> =
         combine(photos, embeddings, categoryPrototypes) { photos, embeds, prototypes ->
