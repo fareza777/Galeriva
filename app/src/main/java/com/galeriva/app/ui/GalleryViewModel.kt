@@ -94,23 +94,33 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         ) { photoList, embeds, query -> Triple(photoList, embeds, query) }
             .mapLatest { (photoList, embeds, query) ->
                 if (query.isBlank()) return@mapLatest emptyList()
-                val queryVectors = buildQueryVectors(query)
+                val queryVector = buildQueryVector(query)
                 val rawWords = query.lowercase()
                     .split(Regex("\\s+"))
                     .filter { it.length >= 4 }
 
+                // Pass 1: semantic scores above the absolute floor.
+                val semanticScores = HashMap<Long, Float>()
+                if (queryVector != null) {
+                    for (photo in photoList) {
+                        val embedding = embeds[photo.id] ?: continue
+                        val score = Embeddings.cosine(queryVector, embedding)
+                        if (score >= SEMANTIC_THRESHOLD) semanticScores[photo.id] = score
+                    }
+                }
+                // Pass 2: relative cutoff — drop the weak tail far below the
+                // best match so borderline noise never reaches the user.
+                val best = semanticScores.values.maxOrNull() ?: 0f
+                val cutoff = maxOf(SEMANTIC_THRESHOLD, best - RELATIVE_MARGIN)
+
                 photoList.mapNotNull { photo ->
-                    val embedding = embeds[photo.id]
-                    val semantic =
-                        if (embedding != null && queryVectors.isNotEmpty())
-                            queryVectors.maxOf { Embeddings.cosine(it, embedding) }
-                        else 0f
+                    val semantic = semanticScores[photo.id] ?: 0f
                     val nameMatch = rawWords.any {
                         photo.name.lowercase().contains(it) ||
                             photo.bucketName.lowercase().contains(it)
                     }
                     when {
-                        semantic >= SEMANTIC_THRESHOLD -> photo to (1f + semantic)
+                        semantic >= cutoff -> photo to (1f + semantic)
                         nameMatch -> photo to 0.5f
                         else -> null
                     }
@@ -120,17 +130,19 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             }
             .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    private suspend fun buildQueryVectors(query: String): List<FloatArray> = buildList {
-        runCatching {
-            app.clipEngine.encodeText(PROMPT_TEMPLATE.format(query))
-        }.getOrNull()?.let(::add)
-
-        val english = translator.toEnglish(query)
-        if (english != null && !english.equals(query, ignoreCase = true)) {
-            runCatching {
-                app.clipEngine.encodeText(PROMPT_TEMPLATE.format(english))
-            }.getOrNull()?.let(::add)
-        }
+    /**
+     * CLIP understands English only, so the query vector is built from the
+     * on-device translation. The raw query is used only when translation is
+     * completely unavailable — never alongside it, because a non-English
+     * string produces a garbage vector that attracts text-heavy photos
+     * (ID photos, QR codes, receipts).
+     */
+    private suspend fun buildQueryVector(query: String): FloatArray? {
+        val english = translator.toEnglish(query)?.takeIf { it.isNotBlank() }
+        val text = english ?: query
+        return runCatching {
+            app.clipEngine.encodeText(PROMPT_TEMPLATE.format(text))
+        }.getOrNull()
     }
 
     /** Folder albums straight from MediaStore buckets. */
@@ -344,7 +356,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     companion object {
         private const val SIMILARITY_THRESHOLD_BITS = 6
-        private const val SEMANTIC_THRESHOLD = 0.23f
+        private const val SEMANTIC_THRESHOLD = 0.24f
+        private const val RELATIVE_MARGIN = 0.05f
         private const val ALBUM_THRESHOLD = 0.24f
         private const val PROMPT_TEMPLATE = "a photo of %s"
 

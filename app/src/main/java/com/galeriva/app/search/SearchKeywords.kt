@@ -95,15 +95,26 @@ object SearchKeywords {
     fun toEnglish(query: String): String? {
         var translatedAny = false
         val words = query.lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
-        val result = words.joinToString(" ") { word ->
-            val mapped = keywordMap[word]?.firstOrNull()
-            if (mapped != null) {
-                translatedAny = true
-                mapped
-            } else {
-                word
+        val result = words.mapNotNull { word ->
+            when {
+                word in STOP_WORDS -> {
+                    translatedAny = true
+                    STOP_WORD_MAP[word]
+                }
+                keywordMap.containsKey(word) -> {
+                    translatedAny = true
+                    keywordMap.getValue(word).first()
+                }
+                else -> word
             }
-        }
-        return if (translatedAny) result else null
+        }.joinToString(" ")
+        return if (translatedAny && result.isNotBlank()) result else null
     }
+
+    private val STOP_WORD_MAP = mapOf(
+        "di" to "at", "ke" to "to", "dari" to "from", "dan" to "and",
+        "dengan" to "with", "sedang" to null, "yang" to null, "lagi" to null,
+        "saat" to "during", "pada" to "at", "foto" to null, "gambar" to null
+    )
+    private val STOP_WORDS = STOP_WORD_MAP.keys
 }
