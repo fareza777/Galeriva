@@ -1,3 +1,4 @@
+import java.io.File
 import java.net.URI
 
 plugins {
@@ -65,29 +66,32 @@ android {
     }
 }
 
-// CLIP model files are large; they are fetched at build time into assets
-// (git-ignored) instead of being committed to the repo.
-val modelAssetsDir = file("src/main/assets/models")
-val modelDownloads = mapOf(
-    "clip_vision_q8.onnx" to
+// Large binary assets (CLIP models, brand font) are fetched at build time
+// into git-ignored assets instead of being committed to the repo.
+val assetsDir = file("src/main/assets")
+val assetDownloads = mapOf(
+    "models/clip_vision_q8.onnx" to
         "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model_quantized.onnx",
-    "clip_text_q8.onnx" to
+    "models/clip_text_q8.onnx" to
         "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/text_model_quantized.onnx",
-    "clip_vocab.json" to
+    "models/clip_vocab.json" to
         "https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/vocab.json",
-    "clip_merges.txt" to
-        "https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/merges.txt"
+    "models/clip_merges.txt" to
+        "https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/merges.txt",
+    // Plus Jakarta Sans (OFL) — variable font, all weights in one file
+    "fonts/plus_jakarta.ttf" to
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/plusjakartasans/PlusJakartaSans%5Bwght%5D.ttf"
 )
 
-val downloadClipModels by tasks.registering {
-    outputs.dir(modelAssetsDir)
+val downloadAssets by tasks.registering {
+    outputs.dir(assetsDir)
     doLast {
-        modelAssetsDir.mkdirs()
-        modelDownloads.forEach { (fileName, url) ->
-            val target = modelAssetsDir.resolve(fileName)
+        assetDownloads.forEach { (relativePath, url) ->
+            val target = assetsDir.resolve(relativePath)
             if (!target.exists() || target.length() == 0L) {
-                logger.lifecycle("Downloading $fileName ...")
-                val tmp = modelAssetsDir.resolve("$fileName.part")
+                logger.lifecycle("Downloading $relativePath ...")
+                target.parentFile.mkdirs()
+                val tmp = File(target.parentFile, target.name + ".part")
                 URI(url).toURL().openStream().use { input ->
                     tmp.outputStream().use { output -> input.copyTo(output) }
                 }
@@ -101,7 +105,7 @@ val downloadClipModels by tasks.registering {
 }
 
 tasks.named("preBuild") {
-    dependsOn(downloadClipModels)
+    dependsOn(downloadAssets)
 }
 
 dependencies {

@@ -1,11 +1,12 @@
 package com.galeriva.app.ui.albums
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -15,14 +16,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -44,38 +49,36 @@ fun AlbumsScreen(
 
     LazyColumn(
         Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(vertical = 8.dp)
+        contentPadding = PaddingValues(top = 8.dp, bottom = 104.dp)
     ) {
-        item {
-            ToolCard(
-                title = "🧹 Foto Duplikat",
-                subtitle = "Temukan foto yang persis sama dan bebaskan ruang",
-                onClick = onDuplicatesClick
-            )
-            ToolCard(
-                title = "✨ Foto Mirip",
-                subtitle = "Kelompokkan jepretan beruntun dan pilih yang terbaik",
-                onClick = onSimilarClick
-            )
-            ToolCard(
-                title = "🔒 Brankas",
-                subtitle = "Foto tersembunyi, dilindungi sidik jari / kunci layar",
-                onClick = onVaultClick
-            )
-        }
         if (smartAlbums.isNotEmpty()) {
             item {
                 SectionTitle("Album Pintar")
                 LazyRow(
-                    contentPadding = PaddingValues(horizontal = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(smartAlbums, key = { it.id }) { album ->
-                        SmartAlbumCard(album) { onAlbumClick(album) }
+                        HeroAlbumCard(album) { onAlbumClick(album) }
                     }
                 }
             }
         }
+
+        item {
+            SectionTitle("Alat Perapih")
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                ToolCard("🧹", "Duplikat", Modifier.weight(1f), onDuplicatesClick)
+                ToolCard("✨", "Mirip", Modifier.weight(1f), onSimilarClick)
+                ToolCard("🔒", "Brankas", Modifier.weight(1f), onVaultClick)
+            }
+        }
+
         item { SectionTitle("Folder di Perangkat") }
         items(folderAlbums, key = { it.id }) { album ->
             FolderRow(album) { onAlbumClick(album) }
@@ -84,40 +87,22 @@ fun AlbumsScreen(
 }
 
 @Composable
-private fun ToolCard(title: String, subtitle: String, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(14.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp)
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
-@Composable
 private fun SectionTitle(text: String) {
     Text(
         text,
-        style = MaterialTheme.typography.titleLarge,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+        style = MaterialTheme.typography.headlineSmall,
+        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 12.dp)
     )
 }
 
+/** Large photo card with a gradient scrim and overlaid title — the hero of the tab. */
 @Composable
-private fun SmartAlbumCard(album: SmartAlbum, onClick: () -> Unit) {
-    Column(
+private fun HeroAlbumCard(album: SmartAlbum, onClick: () -> Unit) {
+    Box(
         Modifier
-            .width(140.dp)
+            .width(164.dp)
+            .height(210.dp)
+            .clip(RoundedCornerShape(22.dp))
             .clickable(onClick = onClick)
     ) {
         AsyncImage(
@@ -125,22 +110,64 @@ private fun SmartAlbumCard(album: SmartAlbum, onClick: () -> Unit) {
             contentDescription = album.title,
             contentScale = ContentScale.Crop,
             modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .clip(RoundedCornerShape(16.dp))
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surfaceVariant)
         )
-        Text(
-            album.title,
-            style = MaterialTheme.typography.titleMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 6.dp)
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0.45f to Color.Transparent,
+                        1f to Color.Black.copy(alpha = 0.75f)
+                    )
+                )
         )
-        Text(
-            "${album.photos.size} foto",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Column(
+            Modifier
+                .align(Alignment.BottomStart)
+                .padding(14.dp)
+        ) {
+            Text(
+                album.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.White,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                "${album.photos.size} foto",
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.White.copy(alpha = 0.75f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ToolCard(
+    emoji: String,
+    title: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = RoundedCornerShape(18.dp),
+        modifier = modifier
+    ) {
+        Column(
+            Modifier.padding(vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(emoji, style = MaterialTheme.typography.headlineSmall)
+            Text(
+                title,
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+        }
     }
 }
 
@@ -149,21 +176,29 @@ private fun FolderRow(album: SmartAlbum, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
         color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(18.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp),
-        shape = RoundedCornerShape(14.dp)
+            .padding(horizontal = 16.dp, vertical = 5.dp)
     ) {
-        Row(Modifier.padding(10.dp)) {
+        Row(
+            Modifier.padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             AsyncImage(
                 model = album.cover?.uri,
                 contentDescription = album.title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .size(56.dp)
-                    .clip(RoundedCornerShape(10.dp))
+                    .size(58.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
             )
-            Column(Modifier.padding(start = 12.dp)) {
+            Column(
+                Modifier
+                    .weight(1f)
+                    .padding(start = 14.dp)
+            ) {
                 Text(
                     album.title,
                     style = MaterialTheme.typography.titleMedium,
@@ -174,6 +209,17 @@ private fun FolderRow(album: SmartAlbum, onClick: () -> Unit) {
                     "${album.photos.size} foto",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh
+            ) {
+                Text(
+                    "${album.photos.size}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                 )
             }
         }

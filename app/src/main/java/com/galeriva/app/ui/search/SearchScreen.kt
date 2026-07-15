@@ -11,17 +11,20 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.galeriva.app.data.Photo
@@ -48,9 +51,27 @@ fun SearchScreen(
         OutlinedTextField(
             value = query,
             onValueChange = { viewModel.searchQuery.value = it },
-            placeholder = { Text("Cari apa saja: \"rapat di kantor\", \"pantai\"…") },
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+            placeholder = {
+                Text(
+                    "Cari apa saja: \"rapat di kantor\", \"pantai\"…",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    Icons.Filled.Search,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            },
             singleLine = true,
+            shape = CircleShape,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                unfocusedBorderColor = Color.Transparent
+            ),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp)
@@ -61,10 +82,17 @@ fun SearchScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(SUGGESTIONS) { suggestion ->
-                AssistChip(
+                Surface(
                     onClick = { viewModel.searchQuery.value = suggestion },
-                    label = { Text(suggestion) }
-                )
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh
+                ) {
+                    Text(
+                        suggestion,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
+                    )
+                }
             }
         }
 
@@ -91,7 +119,9 @@ fun SearchScreen(
                 )
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 104.dp),
-                    contentPadding = PaddingValues(4.dp)
+                    contentPadding = PaddingValues(
+                        start = 4.dp, end = 4.dp, top = 4.dp, bottom = 104.dp
+                    )
                 ) {
                     items(results, key = { it.id }) { photo ->
                         PhotoThumbnail(

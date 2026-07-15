@@ -5,10 +5,14 @@ import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -45,11 +49,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.galeriva.app.data.Photo
 import com.galeriva.app.ui.GalleryViewModel
 import java.text.SimpleDateFormat
@@ -85,16 +91,26 @@ fun GalleryScreen(
         }
         LazyVerticalGrid(
             columns = GridCells.Adaptive(minSize = 104.dp),
-            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+            contentPadding = PaddingValues(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 104.dp),
             modifier = Modifier.fillMaxSize()
         ) {
             grouped.forEach { (dayLabel, dayPhotos) ->
                 item(key = "header-$dayLabel", span = { GridItemSpan(maxLineSpan) }) {
-                    Text(
-                        text = dayLabel,
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 12.dp)
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 14.dp)
+                    ) {
+                        Box(
+                            Modifier
+                                .size(7.dp)
+                                .background(MaterialTheme.colorScheme.primary, CircleShape)
+                        )
+                        Text(
+                            text = dayLabel,
+                            style = MaterialTheme.typography.titleLarge,
+                            modifier = Modifier.padding(start = 10.dp)
+                        )
+                    }
                 }
                 items(dayPhotos, key = { it.id }) { photo ->
                     PhotoThumbnail(
@@ -197,25 +213,45 @@ fun PhotoThumbnail(
     onClick: () -> Unit,
     onLongClick: () -> Unit = {}
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.94f else 1f,
+        animationSpec = spring(stiffness = 500f),
+        label = "press"
+    )
+    val context = LocalContext.current
+
     Box(
         Modifier
             .padding(2.dp)
             .aspectRatio(1f)
-            .clip(RoundedCornerShape(10.dp))
+            .graphicsLayer(scaleX = scale, scaleY = scale)
+            .clip(RoundedCornerShape(12.dp))
             .then(
                 if (isSelected) Modifier.border(
                     3.dp,
                     MaterialTheme.colorScheme.primary,
-                    RoundedCornerShape(10.dp)
+                    RoundedCornerShape(12.dp)
                 ) else Modifier
             )
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .combinedClickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
     ) {
         AsyncImage(
-            model = photo.uri,
+            model = ImageRequest.Builder(context)
+                .data(photo.uri)
+                .crossfade(180)
+                .build(),
             contentDescription = photo.name,
             contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surfaceVariant)
         )
         if (isSelected) {
             Box(
