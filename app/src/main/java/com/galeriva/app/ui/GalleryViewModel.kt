@@ -77,12 +77,28 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         combine(photos, labelsByPhoto, searchQuery) { photos, labels, query ->
             if (query.isBlank()) return@combine emptyList()
             val terms = SearchKeywords.expand(query)
-            photos.filter { photo ->
-                val photoLabels = labels[photo.id].orEmpty()
-                photoLabels.any { row -> terms.any { term -> row.label.contains(term) } } ||
-                    terms.any { term -> photo.name.lowercase().contains(term) } ||
-                    terms.any { term -> photo.bucketName.lowercase().contains(term) }
+            val rawWords = query.lowercase()
+                .split(Regex("\\s+"))
+                .filter { it.length >= 4 }
+
+            photos.mapNotNull { photo ->
+                // Label evidence: exact label match with sufficient confidence.
+                val labelScore = labels[photo.id].orEmpty()
+                    .filter { it.label in terms && it.confidence >= LABEL_MATCH_CONFIDENCE }
+                    .maxOfOrNull { it.confidence } ?: 0f
+                // Filename/folder evidence: the user's own words, e.g. "rapat-tim.jpg".
+                val nameMatch = rawWords.any {
+                    photo.name.lowercase().contains(it) ||
+                        photo.bucketName.lowercase().contains(it)
+                }
+                when {
+                    labelScore > 0f -> photo to (1f + labelScore)
+                    nameMatch -> photo to 0.5f
+                    else -> null
+                }
             }
+                .sortedByDescending { it.second }
+                .map { it.first }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     /** Folder albums straight from MediaStore buckets. */
@@ -101,7 +117,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             SMART_CATEGORIES.mapNotNull { (title, matchLabels) ->
                 val items = photos.filter { photo ->
                     labels[photo.id].orEmpty().any { row ->
-                        matchLabels.any { row.label.contains(it) }
+                        row.label in matchLabels && row.confidence >= LABEL_MATCH_CONFIDENCE
                     }
                 }
                 if (items.isEmpty()) null
@@ -282,16 +298,17 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     companion object {
         private const val SIMILARITY_THRESHOLD_BITS = 6
+        private const val LABEL_MATCH_CONFIDENCE = 0.65f
 
-        private val SMART_CATEGORIES: List<Pair<String, List<String>>> = listOf(
-            "Rapat & Kerja" to listOf("meeting", "whiteboard", "presentation", "computer", "paper", "office", "desk"),
-            "Orang" to listOf("person", "people", "selfie", "smile", "crowd", "face"),
-            "Makanan & Minuman" to listOf("food", "dish", "cuisine", "dessert", "drink", "coffee", "fruit", "cake"),
-            "Alam & Pemandangan" to listOf("landscape", "mountain", "beach", "sea", "sky", "sunset", "nature", "tree", "flower"),
-            "Hewan" to listOf("animal", "cat", "dog", "bird", "pet"),
-            "Kendaraan" to listOf("car", "motorcycle", "vehicle", "bicycle", "airplane"),
-            "Dokumen & Teks" to listOf("paper", "document", "text", "receipt", "book"),
-            "Kota & Bangunan" to listOf("building", "city", "architecture", "street", "skyscraper")
+        private val SMART_CATEGORIES: List<Pair<String, Set<String>>> = listOf(
+            "Rapat & Kerja" to setOf("meeting", "whiteboard", "presentation", "conference", "seminar", "conference room", "office", "classroom", "lecture"),
+            "Orang" to setOf("person", "people", "selfie", "smile", "crowd", "face"),
+            "Makanan & Minuman" to setOf("food", "dish", "cuisine", "dessert", "drink", "coffee", "fruit", "cake", "snack", "salad"),
+            "Alam & Pemandangan" to setOf("landscape", "mountain", "beach", "sea", "sky", "sunset", "nature", "tree", "flower", "waterfall", "lake"),
+            "Hewan" to setOf("animal", "cat", "dog", "bird", "pet", "fish", "butterfly", "horse"),
+            "Kendaraan" to setOf("car", "motorcycle", "vehicle", "bicycle", "airplane", "boat", "train"),
+            "Dokumen & Teks" to setOf("paper", "document", "text", "receipt", "handwriting", "menu"),
+            "Kota & Bangunan" to setOf("building", "city", "architecture", "street", "skyscraper", "bridge", "tower")
         )
     }
 }
