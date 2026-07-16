@@ -324,6 +324,9 @@ fun PhotoThumbnail(
 private fun groupByDay(photos: List<Photo>): List<Pair<String, List<Photo>>> {
     val dayFormat = SimpleDateFormat("EEEE, d MMMM yyyy", Locale("id", "ID"))
     return photos
-        .groupBy { dayFormat.format(Date(it.dateTakenMillis)) }
+        .groupBy { photo ->
+            if (photo.dateTakenMillis <= 0L) "Tanpa Tanggal"
+            else dayFormat.format(Date(photo.dateTakenMillis))
+        }
         .toList()
 }

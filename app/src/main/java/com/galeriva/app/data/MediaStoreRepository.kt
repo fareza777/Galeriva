@@ -81,12 +81,12 @@ class MediaStoreRepository(private val contentResolver: ContentResolver) {
             val widthCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.WIDTH)
             val heightCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.HEIGHT)
 
+            val maxPlausibleMillis = System.currentTimeMillis() + 2 * 24 * 3_600_000L
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idCol)
-                val taken = normalizeTakenMillis(
-                    cursor.getLong(takenCol),
-                    cursor.getLong(addedCol)
-                )
+                val taken = normalizeToMillis(cursor.getLong(takenCol), maxPlausibleMillis)
+                    ?: normalizeToMillis(cursor.getLong(addedCol), maxPlausibleMillis)
+                    ?: 0L
                 photos += Photo(
                     id = id,
                     uri = ContentUris.withAppendedId(
@@ -107,14 +107,22 @@ class MediaStoreRepository(private val contentResolver: ContentResolver) {
     }
 
     /**
-     * DATE_TAKEN should be epoch millis, but some camera/chat apps store
-     * seconds — which would sort those photos into 1970 and make them
-     * "disappear" from the top of the gallery. Values below ~1973 in millis
-     * are treated as seconds; zero/negative falls back to DATE_ADDED.
+     * MediaStore timestamps are inconsistent across vendors: DATE_TAKEN is
+     * documented as millis and DATE_ADDED as seconds, but real devices mix
+     * seconds, millis, and even microseconds. Detect the unit by magnitude
+     * and only accept results in a plausible range (1980 .. now+2 days) —
+     * anything else returns null so the caller can try the next field.
      */
-    private fun normalizeTakenMillis(takenRaw: Long, addedSeconds: Long): Long = when {
-        takenRaw <= 0L -> addedSeconds * 1000
-        takenRaw < 100_000_000_000L -> takenRaw * 1000
-        else -> takenRaw
+    private fun normalizeToMillis(raw: Long, maxPlausibleMillis: Long): Long? {
+        if (raw <= 0L) return null
+        var value = raw
+        while (value > maxPlausibleMillis) value /= 1000 // micro/nano -> millis
+        if (value < MIN_PLAUSIBLE_MILLIS) value *= 1000  // seconds -> millis
+        return value.takeIf { it in MIN_PLAUSIBLE_MILLIS..maxPlausibleMillis }
+    }
+
+    private companion object {
+        // 1 Jan 1980 UTC — no real photo predates this.
+        const val MIN_PLAUSIBLE_MILLIS = 315_532_800_000L
     }
 }
