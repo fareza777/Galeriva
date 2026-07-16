@@ -456,12 +456,23 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                             folderVectorCache[folder.query] = it
                         }
                     val items = if (vector == null) emptyList() else {
-                        photoList.filter { photo ->
-                            val embedding = embeds[photo.id] ?: return@filter false
+                        // Folders are curated collections — precision matters more
+                        // than recall, so the floor is stricter than search and a
+                        // relative cutoff trims everything far below the best match.
+                        val scored = photoList.mapNotNull { photo ->
+                            val embedding = embeds[photo.id] ?: return@mapNotNull null
                             val score = Embeddings.cosine(vector, embedding)
-                            score >= SEMANTIC_THRESHOLD &&
-                                score + DISTRACTOR_MARGIN >= (distractors[photo.id] ?: 0f)
+                            if (score < FOLDER_THRESHOLD) return@mapNotNull null
+                            if (score + DISTRACTOR_MARGIN < (distractors[photo.id] ?: 0f)) {
+                                return@mapNotNull null
+                            }
+                            photo to score
                         }
+                        val best = scored.maxOfOrNull { it.second } ?: 0f
+                        val cutoff = maxOf(FOLDER_THRESHOLD, best - FOLDER_RELATIVE_MARGIN)
+                        scored.filter { it.second >= cutoff }
+                            .sortedByDescending { it.second }
+                            .map { it.first }
                     }
                     SmartAlbum("custom:${folder.id}", folder.name, items.firstOrNull(), items)
                 }
@@ -518,6 +529,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         private const val SIMILARITY_THRESHOLD_BITS = 6
         private const val SEMANTIC_THRESHOLD = 0.24f
         private const val RELATIVE_MARGIN = 0.05f
+        private const val FOLDER_THRESHOLD = 0.26f
+        private const val FOLDER_RELATIVE_MARGIN = 0.04f
         private const val DISTRACTOR_MARGIN = 0.015f
 
         private val DISTRACTOR_PROMPTS = listOf(

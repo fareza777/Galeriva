@@ -176,7 +176,10 @@ private fun CreateFolderDialog(
             Column {
                 Text(
                     "Foto yang cocok dengan deskripsi akan masuk otomatis — " +
-                        "termasuk foto baru di kemudian hari.",
+                        "termasuk foto baru di kemudian hari.\n\n" +
+                        "Penting: tulis APA YANG TERLIHAT di foto, bukan singkatan. " +
+                        "Contoh: bukan \"PPSU\", tapi \"petugas berseragam oranye " +
+                        "membersihkan jalan\".",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
