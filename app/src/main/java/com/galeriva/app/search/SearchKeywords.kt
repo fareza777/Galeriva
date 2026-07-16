@@ -83,7 +83,25 @@ object SearchKeywords {
 
         // Waktu
         "malam" to listOf("night", "moon", "fireworks", "midnight"),
-        "senja" to listOf("sunset", "dusk", "twilight")
+        "senja" to listOf("sunset", "dusk", "twilight"),
+
+        // Warna & seragam (penting untuk folder pintar berbasis warna)
+        "oranye" to listOf("orange"),
+        "jingga" to listOf("orange"),
+        "merah" to listOf("red"),
+        "hijau" to listOf("green"),
+        "biru" to listOf("blue"),
+        "kuning" to listOf("yellow"),
+        "putih" to listOf("white"),
+        "hitam" to listOf("black"),
+        "cokelat" to listOf("brown"),
+        "ungu" to listOf("purple"),
+        "seragam" to listOf("uniform"),
+        "berseragam" to listOf("uniformed"),
+        "petugas" to listOf("workers"),
+        "pekerja" to listOf("workers"),
+        "membersihkan" to listOf("cleaning"),
+        "menyapu" to listOf("sweeping")
     )
 
     /**

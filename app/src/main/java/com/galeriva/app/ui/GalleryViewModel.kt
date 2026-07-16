@@ -25,6 +25,11 @@ import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+private data class QueryBundle(
+    val main: FloatArray,
+    val rivals: List<FloatArray>
+)
+
 private data class CustomFolderInputs(
     val folders: List<SmartFolderEntity>,
     val photos: List<Photo>,
@@ -147,7 +152,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
             .mapLatest { (photoList, embeds, distractors, query) ->
                 if (query.isBlank()) return@mapLatest emptyList()
-                val queryVector = buildQueryVector(query)
+                val bundle = buildQueryBundle(query)
+                val queryVector = bundle?.main
                 val rawWords = query.lowercase()
                     .split(Regex("\\s+"))
                     .filter { it.length >= 4 }
@@ -155,13 +161,14 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 // Pass 1: semantic scores above the absolute floor AND beating
                 // the photo's best distractor (contrastive zero-shot check).
                 val semanticScores = HashMap<Long, Float>()
-                if (queryVector != null) {
+                if (queryVector != null && bundle != null) {
                     for (photo in photoList) {
                         val embedding = embeds[photo.id] ?: continue
                         val score = Embeddings.cosine(queryVector, embedding)
                         if (score < SEMANTIC_THRESHOLD) continue
                         val distractor = distractors[photo.id] ?: 0f
                         if (score + DISTRACTOR_MARGIN < distractor) continue
+                        if (!beatsRivals(score, embedding, bundle.rivals)) continue
                         semanticScores[photo.id] = score
                     }
                 }
@@ -194,16 +201,42 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      * string produces a garbage vector that attracts text-heavy photos
      * (ID photos, QR codes, receipts).
      */
-    private suspend fun buildQueryVector(query: String): FloatArray? {
+    private suspend fun buildQueryVector(query: String): FloatArray? =
+        buildQueryBundle(query)?.main
+
+    /**
+     * Query vector plus "color rival" vectors. CLIP is notoriously weak at
+     * binding colors to objects ("orange uniform" matches khaki uniforms) —
+     * so when the query names a color, rival queries are generated with the
+     * other colors, and a photo must beat ALL rivals to count as a match.
+     */
+    private suspend fun buildQueryBundle(query: String): QueryBundle? {
         val english = translator.toEnglish(query)?.takeIf { it.isNotBlank() }
         val text = english ?: query
-        // Prompt ensembling: encode several phrasings and average them —
-        // a standard trick that measurably improves CLIP retrieval accuracy.
-        val vectors = PROMPT_TEMPLATES.mapNotNull { template ->
-            runCatching { app.clipEngine.encodeText(template.format(text)) }.getOrNull()
+        val main = Embeddings.meanNormalized(
+            PROMPT_TEMPLATES.mapNotNull { template ->
+                runCatching { app.clipEngine.encodeText(template.format(text)) }.getOrNull()
+            }
+        ) ?: return null
+
+        val lower = text.lowercase()
+        val colorInQuery = RIVAL_COLORS.firstOrNull { it in lower }
+        val rivals = if (colorInQuery == null) emptyList() else {
+            RIVAL_COLORS.filter { it != colorInQuery }.mapNotNull { rivalColor ->
+                val rivalText = lower.replace(colorInQuery, rivalColor)
+                runCatching {
+                    app.clipEngine.encodeText("a photo of $rivalText")
+                }.getOrNull()
+            }
         }
-        return Embeddings.meanNormalized(vectors)
+        return QueryBundle(main, rivals)
     }
+
+    private fun beatsRivals(
+        score: Float,
+        embedding: FloatArray,
+        rivals: List<FloatArray>
+    ): Boolean = rivals.all { rival -> Embeddings.cosine(rival, embedding) < score }
 
     /** Folder albums straight from MediaStore buckets. */
     val folderAlbums: StateFlow<List<SmartAlbum>> =
@@ -437,7 +470,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     // ----- Custom smart folders (user-defined name + query) -----
 
     private val folderDao = app.database.smartFolderDao()
-    private val folderVectorCache = HashMap<String, FloatArray>()
+    private val folderVectorCache = HashMap<String, QueryBundle>()
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val customFolders: StateFlow<List<SmartAlbum>> =
@@ -451,19 +484,22 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
             .mapLatest { (folders, photoList, embeds, distractors) ->
                 folders.map { folder ->
-                    val vector = folderVectorCache[folder.query]
-                        ?: buildQueryVector(folder.query)?.also {
+                    val bundle = folderVectorCache[folder.query]
+                        ?: buildQueryBundle(folder.query)?.also {
                             folderVectorCache[folder.query] = it
                         }
-                    val items = if (vector == null) emptyList() else {
+                    val items = if (bundle == null) emptyList() else {
                         // Folders are curated collections — precision matters more
                         // than recall, so the floor is stricter than search and a
                         // relative cutoff trims everything far below the best match.
                         val scored = photoList.mapNotNull { photo ->
                             val embedding = embeds[photo.id] ?: return@mapNotNull null
-                            val score = Embeddings.cosine(vector, embedding)
+                            val score = Embeddings.cosine(bundle.main, embedding)
                             if (score < FOLDER_THRESHOLD) return@mapNotNull null
                             if (score + DISTRACTOR_MARGIN < (distractors[photo.id] ?: 0f)) {
+                                return@mapNotNull null
+                            }
+                            if (!beatsRivals(score, embedding, bundle.rivals)) {
                                 return@mapNotNull null
                             }
                             photo to score
@@ -544,7 +580,15 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             "a photo of an animal",
             "a photo of a product on a plain background",
             "a screenshot of a chat conversation with text messages",
-            "a certificate, poster, or flyer with printed text"
+            "a certificate, poster, or flyer with printed text",
+            "an official ID portrait photo with a solid red or blue background",
+            "a formal portrait of a person in a white shirt and tie"
+        )
+
+        /** Colors used to build rival queries (attribute-binding guard). */
+        private val RIVAL_COLORS = listOf(
+            "orange", "red", "green", "blue", "yellow",
+            "white", "black", "khaki", "brown", "purple", "gray"
         )
         private const val ALBUM_THRESHOLD = 0.24f
         private val PROMPT_TEMPLATES = listOf(
