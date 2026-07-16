@@ -32,6 +32,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.rounded.Archive
 import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Photo
 import androidx.compose.material.icons.rounded.PhotoAlbum
 import androidx.compose.material.icons.rounded.Search
@@ -436,6 +437,18 @@ private fun AlbumDetailScreen(
                                 Icons.Rounded.Archive,
                                 contentDescription = "Ekspor album sebagai ZIP",
                                 tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                    if (album.id.startsWith("custom:")) {
+                        IconButton(onClick = {
+                            viewModel.deleteCustomFolder(album.id)
+                            onBack()
+                        }) {
+                            Icon(
+                                Icons.Rounded.DeleteOutline,
+                                contentDescription = "Hapus folder pintar",
+                                tint = MaterialTheme.colorScheme.error
                             )
                         }
                     }

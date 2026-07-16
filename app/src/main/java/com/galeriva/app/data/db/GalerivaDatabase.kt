@@ -46,6 +46,13 @@ data class PhotoEmbeddingEntity(
     val vector: ByteArray
 )
 
+@Entity(tableName = "smart_folders")
+data class SmartFolderEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val query: String
+)
+
 @Dao
 interface PhotoLabelDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -98,6 +105,18 @@ interface PhotoEmbeddingDao {
 }
 
 @Dao
+interface SmartFolderDao {
+    @Insert
+    suspend fun insert(folder: SmartFolderEntity)
+
+    @Query("DELETE FROM smart_folders WHERE id = :folderId")
+    suspend fun delete(folderId: Long)
+
+    @Query("SELECT * FROM smart_folders ORDER BY id")
+    fun all(): Flow<List<SmartFolderEntity>>
+}
+
+@Dao
 interface LockedPhotoDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun lock(entities: List<LockedPhotoEntity>)
@@ -116,9 +135,12 @@ interface LockedPhotoDao {
         FavoriteEntity::class,
         PhotoHashEntity::class,
         LockedPhotoEntity::class,
-        PhotoEmbeddingEntity::class
+        PhotoEmbeddingEntity::class,
+        SmartFolderEntity::class
     ],
-    version = 3,
+    // v4: smart folders + embedding space switch to ViT-B/16 (forces reindex
+    // via destructive migration — B/32 and B/16 vectors are incompatible).
+    version = 4,
     exportSchema = false
 )
 abstract class GalerivaDatabase : RoomDatabase() {
@@ -127,6 +149,7 @@ abstract class GalerivaDatabase : RoomDatabase() {
     abstract fun photoHashDao(): PhotoHashDao
     abstract fun lockedPhotoDao(): LockedPhotoDao
     abstract fun photoEmbeddingDao(): PhotoEmbeddingDao
+    abstract fun smartFolderDao(): SmartFolderDao
 
     companion object {
         fun create(context: Context): GalerivaDatabase =

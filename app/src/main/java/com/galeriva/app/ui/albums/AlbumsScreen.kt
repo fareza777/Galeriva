@@ -18,12 +18,19 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -46,11 +53,39 @@ fun AlbumsScreen(
 ) {
     val smartAlbums by viewModel.smartAlbums.collectAsStateWithLifecycle()
     val folderAlbums by viewModel.folderAlbums.collectAsStateWithLifecycle()
+    val customFolders by viewModel.customFolders.collectAsStateWithLifecycle()
+    val exportProgress by viewModel.exportProgress.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var showCreateDialog by remember { mutableStateOf(false) }
+
+    if (showCreateDialog) {
+        CreateFolderDialog(
+            onDismiss = { showCreateDialog = false },
+            onCreate = { name, query ->
+                viewModel.addCustomFolder(name, query)
+                showCreateDialog = false
+            }
+        )
+    }
 
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(top = 8.dp, bottom = 104.dp)
     ) {
+        item {
+            SectionTitle("Folder Pintar Saya")
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                item(key = "create") {
+                    CreateFolderCard { showCreateDialog = true }
+                }
+                items(customFolders, key = { it.id }) { album ->
+                    HeroAlbumCard(album) { onAlbumClick(album) }
+                }
+            }
+        }
         if (smartAlbums.isNotEmpty()) {
             item {
                 SectionTitle("Album Pintar")
@@ -76,6 +111,22 @@ fun AlbumsScreen(
                 ToolCard("🧹", "Duplikat", Modifier.weight(1f), onDuplicatesClick)
                 ToolCard("✨", "Mirip", Modifier.weight(1f), onSimilarClick)
                 ToolCard("🔒", "Brankas", Modifier.weight(1f), onVaultClick)
+                ToolCard("📦", "Ekspor", Modifier.weight(1f)) {
+                    viewModel.albumById("all")?.let { all ->
+                        viewModel.exportAlbum(all) { file ->
+                            com.galeriva.app.data.AlbumExporter.share(context, file)
+                        }
+                    }
+                }
+            }
+            val progress = exportProgress
+            if (progress != null) {
+                Text(
+                    "Mengekspor ${progress.first}/${progress.second} foto…",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                )
             }
         }
 
@@ -84,6 +135,83 @@ fun AlbumsScreen(
             FolderRow(album) { onAlbumClick(album) }
         }
     }
+}
+
+@Composable
+private fun CreateFolderCard(onClick: () -> Unit) {
+    Box(
+        Modifier
+            .width(120.dp)
+            .height(210.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .clickable(onClick = onClick)
+    ) {
+        Column(
+            Modifier.align(Alignment.Center),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("＋", style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.primary)
+            Text(
+                "Buat Folder",
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun CreateFolderDialog(
+    onDismiss: () -> Unit,
+    onCreate: (name: String, query: String) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var query by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Folder Pintar Baru", style = MaterialTheme.typography.titleLarge) },
+        text = {
+            Column {
+                Text(
+                    "Foto yang cocok dengan deskripsi akan masuk otomatis — " +
+                        "termasuk foto baru di kemudian hari.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Nama folder") },
+                    placeholder = { Text("Monitoring Lapangan") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 14.dp)
+                )
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text("Deskripsi isi foto") },
+                    placeholder = { Text("petugas bekerja memantau di lapangan") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp)
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onCreate(name, query) },
+                enabled = name.isNotBlank() && query.isNotBlank()
+            ) { Text("Buat") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Batal") }
+        }
+    )
 }
 
 @Composable

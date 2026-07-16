@@ -156,8 +156,8 @@ class ClipEngine(private val context: Context) {
     companion object {
         const val EMBEDDING_DIM = 512
         private const val IMAGE_SIZE = 224
-        private const val VISION_MODEL_ASSET = "models/clip_vision_q8.onnx"
-        private const val TEXT_MODEL_ASSET = "models/clip_text_q8.onnx"
+        private const val VISION_MODEL_ASSET = "models/clip_vision_b16_q8.onnx"
+        private const val TEXT_MODEL_ASSET = "models/clip_text_b16_q8.onnx"
         private val MEAN = floatArrayOf(0.48145466f, 0.4578275f, 0.40821073f)
         private val STD = floatArrayOf(0.26862954f, 0.26130258f, 0.27577711f)
     }

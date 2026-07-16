@@ -9,6 +9,7 @@ import com.galeriva.app.data.Photo
 import com.galeriva.app.data.AlbumExporter
 import com.galeriva.app.data.db.FavoriteEntity
 import com.galeriva.app.data.db.LockedPhotoEntity
+import com.galeriva.app.data.db.SmartFolderEntity
 import com.galeriva.app.semantic.Embeddings
 import com.galeriva.app.semantic.QueryTranslator
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -23,6 +24,13 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
+private data class CustomFolderInputs(
+    val folders: List<SmartFolderEntity>,
+    val photos: List<Photo>,
+    val embeddings: Map<Long, FloatArray>,
+    val distractors: Map<Long, Float>
+)
 
 private data class SearchInputs(
     val photos: List<Photo>,
@@ -426,6 +434,52 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    // ----- Custom smart folders (user-defined name + query) -----
+
+    private val folderDao = app.database.smartFolderDao()
+    private val folderVectorCache = HashMap<String, FloatArray>()
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val customFolders: StateFlow<List<SmartAlbum>> =
+        combine(
+            folderDao.all(),
+            photos,
+            embeddings,
+            distractorScores
+        ) { folders, photoList, embeds, distractors ->
+            CustomFolderInputs(folders, photoList, embeds, distractors)
+        }
+            .mapLatest { (folders, photoList, embeds, distractors) ->
+                folders.map { folder ->
+                    val vector = folderVectorCache[folder.query]
+                        ?: buildQueryVector(folder.query)?.also {
+                            folderVectorCache[folder.query] = it
+                        }
+                    val items = if (vector == null) emptyList() else {
+                        photoList.filter { photo ->
+                            val embedding = embeds[photo.id] ?: return@filter false
+                            val score = Embeddings.cosine(vector, embedding)
+                            score >= SEMANTIC_THRESHOLD &&
+                                score + DISTRACTOR_MARGIN >= (distractors[photo.id] ?: 0f)
+                        }
+                    }
+                    SmartAlbum("custom:${folder.id}", folder.name, items.firstOrNull(), items)
+                }
+            }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    fun addCustomFolder(name: String, query: String) {
+        if (name.isBlank() || query.isBlank()) return
+        viewModelScope.launch {
+            folderDao.insert(SmartFolderEntity(name = name.trim(), query = query.trim()))
+        }
+    }
+
+    fun deleteCustomFolder(albumId: String) {
+        val folderId = albumId.removePrefix("custom:").toLongOrNull() ?: return
+        viewModelScope.launch { folderDao.delete(folderId) }
+    }
+
     // ----- Album export (ZIP) -----
 
     /** (done, total) while an export is running, null when idle. */
@@ -454,8 +508,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun albumById(albumId: String): SmartAlbum? =
-        (smartAlbums.value + folderAlbums.value).firstOrNull { it.id == albumId }
+    fun albumById(albumId: String): SmartAlbum? = when (albumId) {
+        "all" -> SmartAlbum("all", "Semua Foto", photos.value.firstOrNull(), photos.value)
+        else -> (smartAlbums.value + folderAlbums.value + customFolders.value)
+            .firstOrNull { it.id == albumId }
+    }
 
     companion object {
         private const val SIMILARITY_THRESHOLD_BITS = 6

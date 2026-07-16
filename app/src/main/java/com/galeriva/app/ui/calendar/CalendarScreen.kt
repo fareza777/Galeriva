@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.rounded.Archive
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -224,6 +225,8 @@ fun DayScreen(
 ) {
     val photos by viewModel.photos.collectAsStateWithLifecycle()
     val favorites by viewModel.favoriteIds.collectAsStateWithLifecycle()
+    val exportProgress by viewModel.exportProgress.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
     val date = LocalDate.ofEpochDay(epochDay)
     val dayPhotos = remember(photos, epochDay) {
         photos.filter { it.localDate() == date }
@@ -237,6 +240,35 @@ fun DayScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Kembali")
+                    }
+                },
+                actions = {
+                    val progress = exportProgress
+                    if (progress != null) {
+                        Text(
+                            "${progress.first}/${progress.second}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(end = 12.dp)
+                        )
+                    } else if (dayPhotos.isNotEmpty()) {
+                        IconButton(onClick = {
+                            val album = com.galeriva.app.ui.SmartAlbum(
+                                id = "day-export",
+                                title = title,
+                                cover = dayPhotos.first(),
+                                photos = dayPhotos
+                            )
+                            viewModel.exportAlbum(album) { file ->
+                                com.galeriva.app.data.AlbumExporter.share(context, file)
+                            }
+                        }) {
+                            Icon(
+                                Icons.Rounded.Archive,
+                                contentDescription = "Ekspor foto hari ini sebagai ZIP",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
