@@ -10,6 +10,10 @@
     <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
     <!-- Only used once to fetch the offline id->en translation model; photos never leave the device. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Keep indexing alive when the app is swiped away (progress notification). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".GalerivaApp"
@@ -28,6 +32,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

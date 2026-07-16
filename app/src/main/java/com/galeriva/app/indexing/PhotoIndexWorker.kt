@@ -1,12 +1,17 @@
 package com.galeriva.app.indexing
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.os.Build
 import android.provider.MediaStore
+import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
+import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.galeriva.app.GalerivaApp
 import com.galeriva.app.data.MediaStoreRepository
@@ -35,9 +40,24 @@ class PhotoIndexWorker(
         val allPhotos = repository.loadAllPhotos()
         val indexed = dao.indexedPhotoIds().toHashSet()
         val pending = allPhotos.filter { it.id !in indexed }
+        if (pending.isEmpty()) return Result.success()
 
-        for (photo in pending) {
+        // Run as a foreground worker so aggressive OEM battery managers
+        // (MIUI, ColorOS, ...) don't kill indexing when the app is swiped away.
+        try {
+            setForeground(createForegroundInfo(0, pending.size))
+        } catch (_: Exception) {
+            // Foreground not permitted right now — continue as best-effort background work.
+        }
+
+        for ((index, photo) in pending.withIndex()) {
             if (isStopped) return Result.success()
+            if (index % 10 == 0 && index > 0) {
+                try {
+                    setForeground(createForegroundInfo(index, pending.size))
+                } catch (_: Exception) {
+                }
+            }
             try {
                 val bitmap = loadDownsampledBitmap(photo.id) ?: continue
                 hashDao.insert(PhotoHashEntity(photo.id, dHash(bitmap)))
@@ -53,6 +73,39 @@ class PhotoIndexWorker(
             }
         }
         return Result.success()
+    }
+
+    override suspend fun getForegroundInfo(): ForegroundInfo = createForegroundInfo(0, 0)
+
+    private fun createForegroundInfo(done: Int, total: Int): ForegroundInfo {
+        val manager = applicationContext
+            .getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ID,
+                    "Pengindeksan foto",
+                    NotificationManager.IMPORTANCE_LOW
+                )
+            )
+        }
+        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_menu_gallery)
+            .setContentTitle("Galeriva mengindeks foto")
+            .setContentText(if (total > 0) "$done dari $total foto" else "Menyiapkan…")
+            .setProgress(total, done, total == 0)
+            .setOngoing(true)
+            .setSilent(true)
+            .build()
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ForegroundInfo(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            )
+        } else {
+            ForegroundInfo(NOTIFICATION_ID, notification)
+        }
     }
 
     private fun loadDownsampledBitmap(photoId: Long): Bitmap? {
@@ -112,5 +165,7 @@ class PhotoIndexWorker(
     companion object {
         const val WORK_NAME = "galeriva_photo_indexing"
         private const val TARGET_SIZE = 640
+        private const val CHANNEL_ID = "galeriva_indexing"
+        private const val NOTIFICATION_ID = 41
     }
 }

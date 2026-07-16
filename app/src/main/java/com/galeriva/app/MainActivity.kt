@@ -127,6 +127,20 @@ private fun PermissionGate() {
     ) { granted = it }
 
     if (granted) {
+        // Ask once for notification permission (Android 13+) so the indexing
+        // progress notification is visible; indexing runs either way.
+        val notifLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { }
+        androidx.compose.runtime.LaunchedEffect(Unit) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
         GalerivaShell()
     } else {
         OnboardingScreen(onAllow = { launcher.launch(requiredPermission()) })
