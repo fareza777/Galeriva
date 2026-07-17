@@ -177,7 +177,10 @@ interface LockedPhotoDao {
     // via destructive migration — B/32 and B/16 vectors are incompatible).
     // v5: folder_exclusions (non-destructive migration, index preserved).
     // v6: photo_meta (OCR text + face count), non-destructive.
-    version = 6,
+    // v7: embedding space switch to SigLIP — destructive on purpose so all
+    //     media reindex (SigLIP and CLIP vectors are incompatible; this also
+    //     backfills OCR/face data for old photos).
+    version = 7,
     exportSchema = false
 )
 abstract class GalerivaDatabase : RoomDatabase() {

@@ -70,16 +70,14 @@ android {
 // into git-ignored assets instead of being committed to the repo.
 val assetsDir = file("src/main/assets")
 val assetDownloads = mapOf(
-    // CLIP ViT-B/16: same architecture family as B/32 but 4x finer patches —
-    // noticeably better retrieval accuracy (indexing is ~3x slower).
-    "models/clip_vision_b16_q8.onnx" to
-        "https://huggingface.co/Xenova/clip-vit-base-patch16/resolve/main/onnx/vision_model_quantized.onnx",
-    "models/clip_text_b16_q8.onnx" to
-        "https://huggingface.co/Xenova/clip-vit-base-patch16/resolve/main/onnx/text_model_quantized.onnx",
-    "models/clip_vocab.json" to
-        "https://huggingface.co/openai/clip-vit-base-patch16/resolve/main/vocab.json",
-    "models/clip_merges.txt" to
-        "https://huggingface.co/openai/clip-vit-base-patch16/resolve/main/merges.txt",
+    // SigLIP base-patch16-224: sigmoid-trained retrieval model — markedly
+    // better text-image accuracy than CLIP at similar size.
+    "models/siglip_vision_q8.onnx" to
+        "https://huggingface.co/Xenova/siglip-base-patch16-224/resolve/main/onnx/vision_model_quantized.onnx",
+    "models/siglip_text_q8.onnx" to
+        "https://huggingface.co/Xenova/siglip-base-patch16-224/resolve/main/onnx/text_model_quantized.onnx",
+    "models/siglip_tokenizer.json" to
+        "https://huggingface.co/Xenova/siglip-base-patch16-224/resolve/main/tokenizer.json",
     // Plus Jakarta Sans (OFL) — variable font, all weights in one file
     "fonts/plus_jakarta.ttf" to
         "https://raw.githubusercontent.com/google/fonts/main/ofl/plusjakartasans/PlusJakartaSans%5Bwght%5D.ttf"

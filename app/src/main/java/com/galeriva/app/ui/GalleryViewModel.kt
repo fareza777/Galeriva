@@ -684,12 +684,14 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     companion object {
         private const val SIMILARITY_THRESHOLD_BITS = 6
-        private const val SEMANTIC_THRESHOLD = 0.24f
-        private const val RELATIVE_MARGIN = 0.05f
-        private const val FOLDER_THRESHOLD = 0.26f
-        private const val FOLDER_RELATIVE_MARGIN = 0.04f
-        private const val NEGATIVE_SIMILARITY = 0.86f
-        private const val DISTRACTOR_MARGIN = 0.015f
+        // SigLIP similarity scale: the model's own sigmoid decision boundary
+        // sits near cosine 0.11, so thresholds are far lower than CLIP's.
+        private const val SEMANTIC_THRESHOLD = 0.11f
+        private const val RELATIVE_MARGIN = 0.04f
+        private const val FOLDER_THRESHOLD = 0.125f
+        private const val FOLDER_RELATIVE_MARGIN = 0.03f
+        private const val NEGATIVE_SIMILARITY = 0.80f
+        private const val DISTRACTOR_MARGIN = 0.01f
 
         private val DISTRACTOR_PROMPTS = listOf(
             "a passport-style ID photo of a face on a plain background",
@@ -712,9 +714,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             "orange", "red", "green", "blue", "yellow",
             "white", "black", "khaki", "brown", "purple", "gray"
         )
-        private const val ALBUM_THRESHOLD = 0.24f
+        private const val ALBUM_THRESHOLD = 0.12f
         private val PROMPT_TEMPLATES = listOf(
-            "a photo of %s",
+            "a photo of %s.",
             "a picture showing %s",
             "%s"
         )

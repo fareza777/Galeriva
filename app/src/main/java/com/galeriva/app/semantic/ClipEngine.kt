@@ -12,12 +12,12 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.FloatBuffer
 import java.nio.LongBuffer
-import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 /**
- * On-device CLIP (ViT-B/32, int8 ONNX) — turns photos and text queries into
- * 512-dim vectors in the same semantic space. Fully offline.
+ * On-device SigLIP (base-patch16-224, int8 ONNX) — turns photos and text
+ * queries into 768-dim vectors in a shared semantic space. Fully offline.
+ * (Class name kept from the original CLIP engine to avoid churn.)
  */
 class ClipEngine(private val context: Context) {
 
@@ -26,7 +26,7 @@ class ClipEngine(private val context: Context) {
 
     @Volatile private var visionSession: OrtSession? = null
     @Volatile private var textSession: OrtSession? = null
-    @Volatile private var tokenizer: ClipTokenizer? = null
+    @Volatile private var tokenizer: SiglipTokenizer? = null
 
     suspend fun encodeImage(bitmap: Bitmap): FloatArray = withContext(Dispatchers.Default) {
         val session = ensureVision()
@@ -35,7 +35,7 @@ class ClipEngine(private val context: Context) {
             .use { tensor ->
                 val inputName = session.inputNames.first()
                 session.run(mapOf(inputName to tensor)).use { result ->
-                    extractEmbedding(result, "image_embeds")
+                    extractEmbedding(result, listOf("image_embeds", "pooler_output"))
                 }
             }
     }
@@ -43,20 +43,23 @@ class ClipEngine(private val context: Context) {
     suspend fun encodeText(text: String): FloatArray = withContext(Dispatchers.Default) {
         val session = ensureText()
         val tok = checkNotNull(tokenizer)
-        val (ids, mask) = tok.encode(text)
-        val seq = ids.size.toLong()
+        val ids = tok.encode(text)
         val inputs = mutableMapOf<String, OnnxTensor>()
         try {
             for (name in session.inputNames) {
                 when (name) {
-                    "input_ids" ->
-                        inputs[name] = OnnxTensor.createTensor(env, LongBuffer.wrap(ids), longArrayOf(1, seq))
-                    "attention_mask" ->
-                        inputs[name] = OnnxTensor.createTensor(env, LongBuffer.wrap(mask), longArrayOf(1, seq))
+                    "input_ids" -> inputs[name] = OnnxTensor.createTensor(
+                        env, LongBuffer.wrap(ids), longArrayOf(1, ids.size.toLong())
+                    )
+                    "attention_mask" -> inputs[name] = OnnxTensor.createTensor(
+                        env,
+                        LongBuffer.wrap(LongArray(ids.size) { 1L }),
+                        longArrayOf(1, ids.size.toLong())
+                    )
                 }
             }
             session.run(inputs).use { result ->
-                extractEmbedding(result, "text_embeds")
+                extractEmbedding(result, listOf("text_embeds", "pooler_output"))
             }
         } finally {
             inputs.values.forEach { it.close() }
@@ -69,10 +72,7 @@ class ClipEngine(private val context: Context) {
 
     private suspend fun ensureText(): OrtSession = initLock.withLock {
         if (tokenizer == null) {
-            tokenizer = ClipTokenizer(
-                vocabJson = readAssetText("models/clip_vocab.json"),
-                mergesText = readAssetText("models/clip_merges.txt")
-            )
+            tokenizer = SiglipTokenizer(readAssetText("models/siglip_tokenizer.json"))
         }
         textSession ?: createSession(TEXT_MODEL_ASSET).also { textSession = it }
     }
@@ -103,13 +103,33 @@ class ClipEngine(private val context: Context) {
     private fun readAssetText(assetName: String): String =
         context.assets.open(assetName).bufferedReader().use { it.readText() }
 
-    private fun extractEmbedding(result: OrtSession.Result, preferredOutput: String): FloatArray {
-        val optional = result.get(preferredOutput)
-        val value = if (optional.isPresent) optional.get() else result.get(0)
-        val tensor = value as OnnxTensor
+    /**
+     * Picks the pooled embedding from the session outputs: preferred names
+     * first, then the first 2-D tensor — export output names vary.
+     */
+    private fun extractEmbedding(
+        result: OrtSession.Result,
+        preferredNames: List<String>
+    ): FloatArray {
+        for (name in preferredNames) {
+            val optional = result.get(name)
+            if (optional.isPresent) {
+                val tensor = optional.get() as? OnnxTensor ?: continue
+                if (tensor.info.shape.size == 2) return l2Normalize(firstRow(tensor))
+            }
+        }
+        for (entry in result) {
+            val value = entry.value
+            if (value is OnnxTensor && value.info.shape.size == 2) {
+                return l2Normalize(firstRow(value))
+            }
+        }
+        error("No 2-D embedding output found")
+    }
+
+    private fun firstRow(tensor: OnnxTensor): FloatArray {
         @Suppress("UNCHECKED_CAST")
-        val rows = tensor.value as Array<FloatArray>
-        return l2Normalize(rows[0])
+        return (tensor.value as Array<FloatArray>)[0]
     }
 
     private fun l2Normalize(vector: FloatArray): FloatArray {
@@ -120,22 +140,11 @@ class ClipEngine(private val context: Context) {
         return FloatArray(vector.size) { vector[it] / norm }
     }
 
-    /** Resize shortest side to 224, center-crop, normalize with CLIP mean/std, NCHW. */
+    /** SigLIP preprocessing: direct resize to 224x224, normalize (x/255-0.5)/0.5. */
     private fun preprocess(src: Bitmap): FloatBuffer {
-        val scale = IMAGE_SIZE.toFloat() / minOf(src.width, src.height)
-        val w = (src.width * scale).roundToInt().coerceAtLeast(IMAGE_SIZE)
-        val h = (src.height * scale).roundToInt().coerceAtLeast(IMAGE_SIZE)
-        val scaled = Bitmap.createScaledBitmap(src, w, h, true)
-        val cropped = Bitmap.createBitmap(
-            scaled,
-            (w - IMAGE_SIZE) / 2,
-            (h - IMAGE_SIZE) / 2,
-            IMAGE_SIZE,
-            IMAGE_SIZE
-        )
+        val scaled = Bitmap.createScaledBitmap(src, IMAGE_SIZE, IMAGE_SIZE, true)
         val pixels = IntArray(IMAGE_SIZE * IMAGE_SIZE)
-        cropped.getPixels(pixels, 0, IMAGE_SIZE, 0, 0, IMAGE_SIZE, IMAGE_SIZE)
-        if (cropped !== scaled) cropped.recycle()
+        scaled.getPixels(pixels, 0, IMAGE_SIZE, 0, 0, IMAGE_SIZE, IMAGE_SIZE)
         if (scaled !== src) scaled.recycle()
 
         val buffer = FloatBuffer.allocate(3 * IMAGE_SIZE * IMAGE_SIZE)
@@ -146,7 +155,7 @@ class ClipEngine(private val context: Context) {
                     1 -> (pixel shr 8) and 0xFF
                     else -> pixel and 0xFF
                 }
-                buffer.put((raw / 255f - MEAN[channel]) / STD[channel])
+                buffer.put(raw / 127.5f - 1f)
             }
         }
         buffer.rewind()
@@ -154,11 +163,9 @@ class ClipEngine(private val context: Context) {
     }
 
     companion object {
-        const val EMBEDDING_DIM = 512
+        const val EMBEDDING_DIM = 768
         private const val IMAGE_SIZE = 224
-        private const val VISION_MODEL_ASSET = "models/clip_vision_b16_q8.onnx"
-        private const val TEXT_MODEL_ASSET = "models/clip_text_b16_q8.onnx"
-        private val MEAN = floatArrayOf(0.48145466f, 0.4578275f, 0.40821073f)
-        private val STD = floatArrayOf(0.26862954f, 0.26130258f, 0.27577711f)
+        private const val VISION_MODEL_ASSET = "models/siglip_vision_q8.onnx"
+        private const val TEXT_MODEL_ASSET = "models/siglip_text_q8.onnx"
     }
 }
