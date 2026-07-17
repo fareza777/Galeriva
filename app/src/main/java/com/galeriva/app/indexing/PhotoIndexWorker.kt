@@ -15,10 +15,18 @@ import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.galeriva.app.GalerivaApp
 import com.galeriva.app.data.MediaStoreRepository
+import com.galeriva.app.data.Photo
 import com.galeriva.app.data.db.IndexedPhotoEntity
 import com.galeriva.app.data.db.PhotoEmbeddingEntity
 import com.galeriva.app.data.db.PhotoHashEntity
+import com.galeriva.app.data.db.PhotoMetaEntity
 import com.galeriva.app.semantic.Embeddings
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.face.FaceDetection
+import com.google.mlkit.vision.face.FaceDetectorOptions
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import kotlinx.coroutines.tasks.await
 
 /**
  * Indexes photos in the background: computes a CLIP embedding (semantic
@@ -35,7 +43,14 @@ class PhotoIndexWorker(
         val dao = app.database.photoLabelDao()
         val hashDao = app.database.photoHashDao()
         val embeddingDao = app.database.photoEmbeddingDao()
+        val metaDao = app.database.photoMetaDao()
         val repository = MediaStoreRepository(applicationContext.contentResolver)
+        val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        val faceDetector = FaceDetection.getClient(
+            FaceDetectorOptions.Builder()
+                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                .build()
+        )
 
         val allPhotos = repository.loadAllPhotos()
         val indexed = dao.indexedPhotoIds().toHashSet()
@@ -59,20 +74,61 @@ class PhotoIndexWorker(
                 }
             }
             try {
-                val bitmap = loadDownsampledBitmap(photo.id) ?: continue
-                hashDao.insert(PhotoHashEntity(photo.id, dHash(bitmap)))
+                val bitmap =
+                    if (photo.isVideo) loadVideoThumbnail(photo) else loadDownsampledBitmap(photo.id)
+                if (bitmap == null) continue
+                if (!photo.isVideo) {
+                    hashDao.insert(PhotoHashEntity(photo.id, dHash(bitmap)))
+                }
                 val embedding = app.clipEngine.encodeImage(bitmap)
-                bitmap.recycle()
                 embeddingDao.insert(
                     PhotoEmbeddingEntity(photo.id, Embeddings.toBytes(embedding))
                 )
+                if (!photo.isVideo) {
+                    val input = InputImage.fromBitmap(bitmap, 0)
+                    val ocrText = try {
+                        textRecognizer.process(input).await().text
+                            .lowercase().replace('\n', ' ').take(600)
+                    } catch (_: Exception) {
+                        ""
+                    }
+                    val faceCount = try {
+                        faceDetector.process(input).await().size
+                    } catch (_: Exception) {
+                        0
+                    }
+                    metaDao.insert(PhotoMetaEntity(photo.id, ocrText, faceCount))
+                }
+                bitmap.recycle()
             } catch (_: Exception) {
-                // Skip unreadable/corrupt images; still mark as indexed below
+                // Skip unreadable/corrupt media; still mark as indexed below
             } finally {
                 dao.markIndexed(IndexedPhotoEntity(photo.id))
             }
         }
+        textRecognizer.close()
+        faceDetector.close()
         return Result.success()
+    }
+
+    private fun loadVideoThumbnail(photo: Photo): Bitmap? = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            applicationContext.contentResolver.loadThumbnail(
+                photo.uri,
+                android.util.Size(TARGET_SIZE, TARGET_SIZE),
+                null
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            MediaStore.Video.Thumbnails.getThumbnail(
+                applicationContext.contentResolver,
+                photo.id,
+                MediaStore.Video.Thumbnails.MINI_KIND,
+                null
+            )
+        }
+    } catch (_: Exception) {
+        null
     }
 
     override suspend fun getForegroundInfo(): ForegroundInfo = createForegroundInfo(0, 0)

@@ -10,5 +10,7 @@ data class Photo(
     val bucketName: String,
     val sizeBytes: Long,
     val width: Int,
-    val height: Int
+    val height: Int,
+    val isVideo: Boolean = false,
+    val durationMillis: Long = 0
 )

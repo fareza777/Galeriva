@@ -60,6 +60,14 @@ data class FolderExclusionEntity(
     val photoId: Long
 )
 
+/** Per-photo metadata from indexing: OCR text + detected face count. */
+@Entity(tableName = "photo_meta")
+data class PhotoMetaEntity(
+    @PrimaryKey val photoId: Long,
+    val ocrText: String,
+    val faceCount: Int
+)
+
 @Dao
 interface PhotoLabelDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -100,6 +108,15 @@ interface PhotoHashDao {
 
     @Query("SELECT * FROM photo_hashes")
     suspend fun allHashes(): List<PhotoHashEntity>
+}
+
+@Dao
+interface PhotoMetaDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(meta: PhotoMetaEntity)
+
+    @Query("SELECT * FROM photo_meta")
+    fun all(): Flow<List<PhotoMetaEntity>>
 }
 
 @Dao
@@ -153,12 +170,14 @@ interface LockedPhotoDao {
         LockedPhotoEntity::class,
         PhotoEmbeddingEntity::class,
         SmartFolderEntity::class,
-        FolderExclusionEntity::class
+        FolderExclusionEntity::class,
+        PhotoMetaEntity::class
     ],
     // v4: smart folders + embedding space switch to ViT-B/16 (forces reindex
     // via destructive migration — B/32 and B/16 vectors are incompatible).
     // v5: folder_exclusions (non-destructive migration, index preserved).
-    version = 5,
+    // v6: photo_meta (OCR text + face count), non-destructive.
+    version = 6,
     exportSchema = false
 )
 abstract class GalerivaDatabase : RoomDatabase() {
@@ -167,6 +186,7 @@ abstract class GalerivaDatabase : RoomDatabase() {
     abstract fun photoHashDao(): PhotoHashDao
     abstract fun lockedPhotoDao(): LockedPhotoDao
     abstract fun photoEmbeddingDao(): PhotoEmbeddingDao
+    abstract fun photoMetaDao(): PhotoMetaDao
     abstract fun smartFolderDao(): SmartFolderDao
 
     companion object {
@@ -180,9 +200,19 @@ abstract class GalerivaDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS photo_meta (" +
+                        "photoId INTEGER NOT NULL PRIMARY KEY, " +
+                        "ocrText TEXT NOT NULL, faceCount INTEGER NOT NULL)"
+                )
+            }
+        }
+
         fun create(context: Context): GalerivaDatabase =
             Room.databaseBuilder(context, GalerivaDatabase::class.java, "galeriva.db")
-                .addMigrations(MIGRATION_4_5)
+                .addMigrations(MIGRATION_4_5, MIGRATION_5_6)
                 .fallbackToDestructiveMigration()
                 .build()
     }

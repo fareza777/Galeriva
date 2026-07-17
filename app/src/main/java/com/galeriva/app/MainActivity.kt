@@ -10,6 +10,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -83,6 +85,7 @@ import com.galeriva.app.ui.duplicates.DuplicatesScreen
 import com.galeriva.app.ui.duplicates.SimilarScreen
 import com.galeriva.app.ui.gallery.GalleryScreen
 import com.galeriva.app.ui.gallery.PhotoThumbnail
+import com.galeriva.app.ui.stats.StatsScreen
 import com.galeriva.app.ui.theme.Brand
 import com.galeriva.app.ui.theme.GalerivaTheme
 import com.galeriva.app.ui.vault.VaultScreen
@@ -95,13 +98,14 @@ class MainActivity : FragmentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val startDest = if (intent?.getStringExtra("dest") == "search") "search" else "gallery"
         setContent {
             GalerivaTheme {
                 Surface(
                     Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    PermissionGate()
+                    PermissionGate(startDest)
                 }
             }
         }
@@ -115,7 +119,7 @@ private fun requiredPermission(): String =
         Manifest.permission.READ_EXTERNAL_STORAGE
 
 @Composable
-private fun PermissionGate() {
+private fun PermissionGate(startDest: String = "gallery") {
     val context = LocalContext.current
     var granted by remember {
         mutableStateOf(
@@ -124,8 +128,8 @@ private fun PermissionGate() {
         )
     }
     val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted = it }
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results -> granted = results[requiredPermission()] == true }
 
     if (granted) {
         // Ask once for notification permission (Android 13+) so the indexing
@@ -142,9 +146,19 @@ private fun PermissionGate() {
                 notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
-        GalerivaShell()
+        GalerivaShell(startDest)
     } else {
-        OnboardingScreen(onAllow = { launcher.launch(requiredPermission()) })
+        OnboardingScreen(onAllow = {
+            val permissions =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                    arrayOf(
+                        Manifest.permission.READ_MEDIA_IMAGES,
+                        Manifest.permission.READ_MEDIA_VIDEO
+                    )
+                else
+                    arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+            launcher.launch(permissions)
+        })
     }
 }
 
@@ -236,7 +250,7 @@ private fun FeatureRow(emoji: String, title: String, body: String) {
 }
 
 @Composable
-private fun GalerivaShell() {
+private fun GalerivaShell(startDest: String = "gallery") {
     val navController: NavHostController = rememberNavController()
     val viewModel: GalleryViewModel = viewModel()
     val photos by viewModel.photos.collectAsStateWithLifecycle()
@@ -290,7 +304,7 @@ private fun GalerivaShell() {
             }
             NavHost(
                 navController = navController,
-                startDestination = "gallery",
+                startDestination = startDest,
                 enterTransition = { fadeIn(tween(220)) },
                 exitTransition = { fadeOut(tween(160)) },
                 popEnterTransition = { fadeIn(tween(220)) },
@@ -310,7 +324,14 @@ private fun GalerivaShell() {
                         onSimilarClick = { navController.navigate("similar") },
                         onVaultClick = {
                             authenticateVault(activity) { navController.navigate("vault") }
-                        }
+                        },
+                        onStatsClick = { navController.navigate("stats") }
+                    )
+                }
+                composable("stats") {
+                    StatsScreen(
+                        viewModel = viewModel,
+                        onBack = { navController.popBackStack() }
                     )
                 }
                 composable("search") {
@@ -368,7 +389,17 @@ private fun GalerivaShell() {
                         )
                     }
                 }
-                composable("viewer/{source}/{photoId}") { entry ->
+                composable(
+                    "viewer/{source}/{photoId}",
+                    enterTransition = {
+                        scaleIn(initialScale = 0.92f, animationSpec = tween(220)) +
+                            fadeIn(tween(220))
+                    },
+                    popExitTransition = {
+                        scaleOut(targetScale = 0.94f, animationSpec = tween(180)) +
+                            fadeOut(tween(180))
+                    }
+                ) { entry ->
                     val source = entry.arguments?.getString("source") ?: "all"
                     val photoId = entry.arguments?.getString("photoId")?.toLongOrNull()
                         ?: return@composable

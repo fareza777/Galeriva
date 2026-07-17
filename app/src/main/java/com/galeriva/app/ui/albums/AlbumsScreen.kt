@@ -1,5 +1,8 @@
 package com.galeriva.app.ui.albums
 
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -49,7 +52,8 @@ fun AlbumsScreen(
     onAlbumClick: (SmartAlbum) -> Unit,
     onDuplicatesClick: () -> Unit,
     onSimilarClick: () -> Unit,
-    onVaultClick: () -> Unit
+    onVaultClick: () -> Unit,
+    onStatsClick: () -> Unit
 ) {
     val smartAlbums by viewModel.smartAlbums.collectAsStateWithLifecycle()
     val folderAlbums by viewModel.folderAlbums.collectAsStateWithLifecycle()
@@ -57,6 +61,58 @@ fun AlbumsScreen(
     val exportProgress by viewModel.exportProgress.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showCreateDialog by remember { mutableStateOf(false) }
+    var showBackupDialog by remember { mutableStateOf(false) }
+
+    val restoreLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.importIndex(uri) { ok ->
+                if (ok) {
+                    Toast.makeText(
+                        context,
+                        "Indeks dipulihkan — aplikasi akan ditutup, buka kembali.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    (context as? android.app.Activity)?.finishAffinity()
+                    kotlin.system.exitProcess(0)
+                } else {
+                    Toast.makeText(context, "Gagal memulihkan cadangan.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    if (showBackupDialog) {
+        AlertDialog(
+            onDismissRequest = { showBackupDialog = false },
+            title = { Text("Cadangan Indeks", style = MaterialTheme.typography.titleLarge) },
+            text = {
+                Text(
+                    "Simpan hasil indeks AI (embedding, folder pintar, favorit) ke file — " +
+                        "berguna saat ganti HP agar tidak perlu mengindeks ulang.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showBackupDialog = false
+                    viewModel.exportIndex { file ->
+                        com.galeriva.app.data.AlbumExporter.shareFile(
+                            context, file, "application/octet-stream"
+                        )
+                    }
+                }) { Text("Ekspor") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showBackupDialog = false
+                    restoreLauncher.launch(arrayOf("*/*"))
+                }) { Text("Pulihkan dari File") }
+            }
+        )
+    }
 
     if (showCreateDialog) {
         CreateFolderDialog(
@@ -111,6 +167,13 @@ fun AlbumsScreen(
                 ToolCard("🧹", "Duplikat", Modifier.weight(1f), onDuplicatesClick)
                 ToolCard("✨", "Mirip", Modifier.weight(1f), onSimilarClick)
                 ToolCard("🔒", "Brankas", Modifier.weight(1f), onVaultClick)
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 ToolCard("📦", "Ekspor", Modifier.weight(1f)) {
                     viewModel.albumById("all")?.let { all ->
                         viewModel.exportAlbum(all) { file ->
@@ -118,6 +181,8 @@ fun AlbumsScreen(
                         }
                     }
                 }
+                ToolCard("📊", "Statistik", Modifier.weight(1f), onStatsClick)
+                ToolCard("🗄️", "Cadangan", Modifier.weight(1f)) { showBackupDialog = true }
             }
             val progress = exportProgress
             if (progress != null) {

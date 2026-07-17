@@ -407,6 +407,18 @@ fun PhotoThumbnail(
                     .background(Color.White, CircleShape)
             )
         }
+        if (photo.isVideo) {
+            Text(
+                formatDuration(photo.durationMillis),
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.White,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(6.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 5.dp, vertical = 1.dp)
+            )
+        }
         if (isFavorite && !isSelected) {
             Icon(
                 Icons.Filled.Favorite,
@@ -419,6 +431,13 @@ fun PhotoThumbnail(
             )
         }
     }
+}
+
+private fun formatDuration(millis: Long): String {
+    val totalSeconds = millis / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "%d:%02d".format(minutes, seconds)
 }
 
 private fun groupByDay(photos: List<Photo>): List<Pair<String, List<Photo>>> {

@@ -105,6 +105,12 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     val searchQuery = MutableStateFlow("")
 
+    /** photoId -> OCR text + face count (from indexing). */
+    val metaById: StateFlow<Map<Long, com.galeriva.app.data.db.PhotoMetaEntity>> =
+        app.database.photoMetaDao().all()
+            .map { rows -> rows.associateBy { it.photoId } }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
     /** photoId -> CLIP embedding (L2-normalized, in memory for fast search). */
     private val embeddings: StateFlow<Map<Long, FloatArray>> =
         embeddingDao.all()
@@ -179,14 +185,20 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 val best = semanticScores.values.maxOrNull() ?: 0f
                 val cutoff = maxOf(SEMANTIC_THRESHOLD, best - RELATIVE_MARGIN)
 
+                val meta = metaById.value
                 photoList.mapNotNull { photo ->
                     val semantic = semanticScores[photo.id] ?: 0f
                     val nameMatch = rawWords.any {
                         photo.name.lowercase().contains(it) ||
                             photo.bucketName.lowercase().contains(it)
                     }
+                    // OCR: query words found in the text inside the photo
+                    // (receipts, documents, signs) — high-precision evidence.
+                    val ocrText = meta[photo.id]?.ocrText.orEmpty()
+                    val ocrMatch = ocrText.isNotEmpty() && rawWords.any { it in ocrText }
                     when {
                         semantic >= cutoff -> photo to (1f + semantic)
+                        ocrMatch -> photo to 0.9f
                         nameMatch -> photo to 0.5f
                         else -> null
                     }
@@ -446,7 +458,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             try {
                 // Cheap pre-filter: identical size + dimensions, then confirm by MD5.
                 val candidates = photos.value
-                    .filter { it.sizeBytes > 0 }
+                    .filter { !it.isVideo && it.sizeBytes > 0 }
                     .groupBy { Triple(it.sizeBytes, it.width, it.height) }
                     .values
                     .filter { it.size > 1 }
@@ -500,6 +512,10 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                         // Folders are curated collections — precision matters more
                         // than recall, so the floor is stricter than search and a
                         // relative cutoff trims everything far below the best match.
+                        // Curation learning: embeddings of kicked-out photos act
+                        // as negative exemplars — anything that looks more like a
+                        // rejected photo than like the query is rejected too.
+                        val negatives = excluded.mapNotNull { embeds[it] }
                         val scored = photoList.mapNotNull { photo ->
                             if (photo.id in excluded) return@mapNotNull null
                             val embedding = embeds[photo.id] ?: return@mapNotNull null
@@ -509,6 +525,14 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                                 return@mapNotNull null
                             }
                             if (!beatsRivals(score, embedding, bundle.rivals)) {
+                                return@mapNotNull null
+                            }
+                            val nearestNegative = negatives.maxOfOrNull {
+                                Embeddings.cosine(it, embedding)
+                            } ?: 0f
+                            if (nearestNegative > NEGATIVE_SIMILARITY ||
+                                nearestNegative > score
+                            ) {
                                 return@mapNotNull null
                             }
                             photo to score
@@ -604,6 +628,47 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    // ----- Index backup / restore -----
+
+    /** Copies the index database to a shareable file (WAL checkpointed first). */
+    fun exportIndex(onDone: (java.io.File) -> Unit) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val file = runCatching {
+                app.database.openHelper.writableDatabase
+                    .query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
+                val source = app.getDatabasePath("galeriva.db")
+                val dir = java.io.File(app.cacheDir, "exports").apply {
+                    mkdirs()
+                    listFiles()?.forEach { it.delete() }
+                }
+                java.io.File(dir, "galeriva-cadangan-indeks.db").also {
+                    source.copyTo(it, overwrite = true)
+                }
+            }.getOrNull() ?: return@launch
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                onDone(file)
+            }
+        }
+    }
+
+    /** Replaces the index database with a backup file; app must restart after. */
+    fun importIndex(uri: android.net.Uri, onDone: (Boolean) -> Unit) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val ok = runCatching {
+                app.database.close()
+                val dbFile = app.getDatabasePath("galeriva.db")
+                app.getDatabasePath("galeriva.db-wal").delete()
+                app.getDatabasePath("galeriva.db-shm").delete()
+                app.contentResolver.openInputStream(uri)?.use { input ->
+                    dbFile.outputStream().use { output -> input.copyTo(output) }
+                } != null
+            }.getOrDefault(false)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                onDone(ok)
+            }
+        }
+    }
+
     fun toggleFavorite(photoId: Long) {
         viewModelScope.launch {
             if (photoId in favoriteIds.value) favoriteDao.remove(photoId)
@@ -623,6 +688,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         private const val RELATIVE_MARGIN = 0.05f
         private const val FOLDER_THRESHOLD = 0.26f
         private const val FOLDER_RELATIVE_MARGIN = 0.04f
+        private const val NEGATIVE_SIMILARITY = 0.86f
         private const val DISTRACTOR_MARGIN = 0.015f
 
         private val DISTRACTOR_PROMPTS = listOf(

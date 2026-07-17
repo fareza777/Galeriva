@@ -123,6 +123,10 @@ class MediaStoreRepository(private val contentResolver: ContentResolver) {
     }
 
     suspend fun loadAllPhotos(): List<Photo> = withContext(Dispatchers.IO) {
+        (loadImages() + loadVideos()).sortedByDescending { it.dateTakenMillis }
+    }
+
+    private fun loadImages(): List<Photo> {
         val photos = mutableListOf<Photo>()
         val projection = arrayOf(
             MediaStore.Images.Media._ID,
@@ -170,9 +174,66 @@ class MediaStoreRepository(private val contentResolver: ContentResolver) {
                 )
             }
         }
-        // Re-sort in memory: DATE_TAKEN normalization may reorder rows
-        // relative to the SQL sort (some vendors store seconds, not millis).
-        photos.sortedByDescending { it.dateTakenMillis }
+        return photos
+    }
+
+    private fun loadVideos(): List<Photo> {
+        val videos = mutableListOf<Photo>()
+        val projection = arrayOf(
+            MediaStore.Video.Media._ID,
+            MediaStore.Video.Media.DISPLAY_NAME,
+            MediaStore.Video.Media.DATE_TAKEN,
+            MediaStore.Video.Media.DATE_ADDED,
+            MediaStore.Video.Media.BUCKET_DISPLAY_NAME,
+            MediaStore.Video.Media.SIZE,
+            MediaStore.Video.Media.WIDTH,
+            MediaStore.Video.Media.HEIGHT,
+            MediaStore.Video.Media.DURATION
+        )
+        try {
+            contentResolver.query(
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+                val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
+                val takenCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_TAKEN)
+                val addedCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED)
+                val bucketCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.BUCKET_DISPLAY_NAME)
+                val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
+                val widthCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.WIDTH)
+                val heightCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.HEIGHT)
+                val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
+                val maxPlausibleMillis = System.currentTimeMillis() + 2 * 24 * 3_600_000L
+
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(idCol)
+                    val taken = normalizeToMillis(cursor.getLong(takenCol), maxPlausibleMillis)
+                        ?: normalizeToMillis(cursor.getLong(addedCol), maxPlausibleMillis)
+                        ?: 0L
+                    videos += Photo(
+                        id = id,
+                        uri = ContentUris.withAppendedId(
+                            MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id
+                        ),
+                        name = cursor.getString(nameCol) ?: "",
+                        dateTakenMillis = taken,
+                        bucketName = cursor.getString(bucketCol) ?: "Lainnya",
+                        sizeBytes = cursor.getLong(sizeCol),
+                        width = cursor.getInt(widthCol),
+                        height = cursor.getInt(heightCol),
+                        isVideo = true,
+                        durationMillis = cursor.getLong(durationCol)
+                    )
+                }
+            }
+        } catch (_: Exception) {
+            // Video volume unavailable on some devices — photos still load.
+        }
+        return videos
     }
 
     /**

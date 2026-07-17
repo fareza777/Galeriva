@@ -44,14 +44,16 @@ object AlbumExporter {
         zipFile
     }
 
-    fun share(context: Context, file: File) {
+    fun share(context: Context, file: File) = shareFile(context, file, "application/zip")
+
+    fun shareFile(context: Context, file: File, mime: String) {
         val uri = FileProvider.getUriForFile(
             context,
             "${context.packageName}.fileprovider",
             file
         )
         val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "application/zip"
+            type = mime
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }

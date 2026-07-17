@@ -126,8 +126,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
     implementation("androidx.navigation:navigation-compose:2.8.2")
 
-    // Image loading
+    // Image loading (+ video frame thumbnails)
     implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("io.coil-kt:coil-video:2.7.0")
 
     // Local database (photo labels, favorites)
     implementation("androidx.room:room-runtime:2.6.1")
@@ -144,6 +145,9 @@ dependencies {
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.19.2")
     // On-device Indonesian -> English query translation
     implementation("com.google.mlkit:translate:17.0.3")
+    // On-device OCR (search text inside photos) and face detection (stats/albums)
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation("com.google.mlkit:face-detection:16.1.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
 
     testImplementation("junit:junit:4.13.2")
