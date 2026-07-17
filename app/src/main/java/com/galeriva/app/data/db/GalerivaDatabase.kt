@@ -53,6 +53,13 @@ data class SmartFolderEntity(
     val query: String
 )
 
+/** A photo the user manually kicked out of a smart folder — never returns. */
+@Entity(tableName = "folder_exclusions", primaryKeys = ["folderId", "photoId"])
+data class FolderExclusionEntity(
+    val folderId: Long,
+    val photoId: Long
+)
+
 @Dao
 interface PhotoLabelDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -114,6 +121,15 @@ interface SmartFolderDao {
 
     @Query("SELECT * FROM smart_folders ORDER BY id")
     fun all(): Flow<List<SmartFolderEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun exclude(exclusions: List<FolderExclusionEntity>)
+
+    @Query("SELECT * FROM folder_exclusions")
+    fun allExclusions(): Flow<List<FolderExclusionEntity>>
+
+    @Query("DELETE FROM folder_exclusions WHERE folderId = :folderId")
+    suspend fun clearExclusions(folderId: Long)
 }
 
 @Dao
@@ -136,11 +152,13 @@ interface LockedPhotoDao {
         PhotoHashEntity::class,
         LockedPhotoEntity::class,
         PhotoEmbeddingEntity::class,
-        SmartFolderEntity::class
+        SmartFolderEntity::class,
+        FolderExclusionEntity::class
     ],
     // v4: smart folders + embedding space switch to ViT-B/16 (forces reindex
     // via destructive migration — B/32 and B/16 vectors are incompatible).
-    version = 4,
+    // v5: folder_exclusions (non-destructive migration, index preserved).
+    version = 5,
     exportSchema = false
 )
 abstract class GalerivaDatabase : RoomDatabase() {
@@ -152,8 +170,19 @@ abstract class GalerivaDatabase : RoomDatabase() {
     abstract fun smartFolderDao(): SmartFolderDao
 
     companion object {
+        private val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS folder_exclusions (" +
+                        "folderId INTEGER NOT NULL, photoId INTEGER NOT NULL, " +
+                        "PRIMARY KEY(folderId, photoId))"
+                )
+            }
+        }
+
         fun create(context: Context): GalerivaDatabase =
             Room.databaseBuilder(context, GalerivaDatabase::class.java, "galeriva.db")
+                .addMigrations(MIGRATION_4_5)
                 .fallbackToDestructiveMigration()
                 .build()
     }

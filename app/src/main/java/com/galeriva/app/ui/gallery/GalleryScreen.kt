@@ -14,6 +14,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -36,17 +38,24 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.rounded.DriveFileMove
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -173,6 +182,21 @@ fun SelectionActionBar(
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) viewModel.onDeleteConfirmed()
     }
+    var showMoveDialog by remember { mutableStateOf(false) }
+    val copyProgress by viewModel.copyProgress.collectAsStateWithLifecycle()
+
+    if (showMoveDialog) {
+        MoveToFolderDialog(
+            existingFolders = viewModel.folderAlbums.value.map { it.title },
+            onDismiss = { showMoveDialog = false },
+            onConfirm = { folderName, move ->
+                showMoveDialog = false
+                viewModel.copySelectedToFolder(folderName, move) { sender ->
+                    deleteLauncher.launch(IntentSenderRequest.Builder(sender).build())
+                }
+            }
+        )
+    }
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -208,6 +232,17 @@ fun SelectionActionBar(
             IconButton(onClick = { viewModel.lockSelected() }) {
                 Icon(Icons.Filled.Lock, "Masukkan ke Brankas")
             }
+            if (copyProgress != null) {
+                Text(
+                    "${copyProgress?.first}/${copyProgress?.second}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            } else {
+                IconButton(onClick = { showMoveDialog = true }) {
+                    Icon(Icons.Rounded.DriveFileMove, "Salin/pindah ke folder")
+                }
+            }
             IconButton(onClick = {
                 viewModel.deletePhotoIds(selected) { sender ->
                     deleteLauncher.launch(IntentSenderRequest.Builder(sender).build())
@@ -217,6 +252,71 @@ fun SelectionActionBar(
             }
         }
     }
+}
+
+@Composable
+private fun MoveToFolderDialog(
+    existingFolders: List<String>,
+    onDismiss: () -> Unit,
+    onConfirm: (folderName: String, move: Boolean) -> Unit
+) {
+    var folderName by remember { mutableStateOf("") }
+    var move by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Salin / Pindah ke Folder", style = MaterialTheme.typography.titleLarge) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = folderName,
+                    onValueChange = { folderName = it },
+                    label = { Text("Nama folder tujuan") },
+                    placeholder = { Text("Folder baru atau pilih di bawah") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (existingFolders.isNotEmpty()) {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(vertical = 10.dp)
+                    ) {
+                        items(existingFolders.size) { index ->
+                            val name = existingFolders[index]
+                            Surface(
+                                onClick = { folderName = name },
+                                shape = CircleShape,
+                                color = if (folderName == name)
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
+                                else MaterialTheme.colorScheme.surfaceContainerHigh
+                            ) {
+                                Text(
+                                    name,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(checked = move, onCheckedChange = { move = it })
+                    Text(
+                        if (move) "Pindahkan (asli dihapus setelah konfirmasi)"
+                        else "Salin (asli tetap ada)",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(start = 10.dp)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(folderName, move) },
+                enabled = folderName.isNotBlank()
+            ) { Text(if (move) "Pindahkan" else "Salin") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Batal") } }
+    )
 }
 
 @Composable

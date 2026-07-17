@@ -8,6 +8,7 @@ import com.galeriva.app.data.MediaStoreRepository
 import com.galeriva.app.data.Photo
 import com.galeriva.app.data.AlbumExporter
 import com.galeriva.app.data.db.FavoriteEntity
+import com.galeriva.app.data.db.FolderExclusionEntity
 import com.galeriva.app.data.db.LockedPhotoEntity
 import com.galeriva.app.data.db.SmartFolderEntity
 import com.galeriva.app.semantic.Embeddings
@@ -34,7 +35,8 @@ private data class CustomFolderInputs(
     val folders: List<SmartFolderEntity>,
     val photos: List<Photo>,
     val embeddings: Map<Long, FloatArray>,
-    val distractors: Map<Long, Float>
+    val distractors: Map<Long, Float>,
+    val exclusions: Map<Long, Set<Long>>
 )
 
 private data class SearchInputs(
@@ -478,12 +480,18 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             folderDao.all(),
             photos,
             embeddings,
-            distractorScores
-        ) { folders, photoList, embeds, distractors ->
-            CustomFolderInputs(folders, photoList, embeds, distractors)
+            distractorScores,
+            folderDao.allExclusions()
+        ) { folders, photoList, embeds, distractors, exclusions ->
+            CustomFolderInputs(
+                folders, photoList, embeds, distractors,
+                exclusions.groupBy({ it.folderId }, { it.photoId })
+                    .mapValues { (_, ids) -> ids.toSet() }
+            )
         }
-            .mapLatest { (folders, photoList, embeds, distractors) ->
+            .mapLatest { (folders, photoList, embeds, distractors, exclusions) ->
                 folders.map { folder ->
+                    val excluded = exclusions[folder.id].orEmpty()
                     val bundle = folderVectorCache[folder.query]
                         ?: buildQueryBundle(folder.query)?.also {
                             folderVectorCache[folder.query] = it
@@ -493,6 +501,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                         // than recall, so the floor is stricter than search and a
                         // relative cutoff trims everything far below the best match.
                         val scored = photoList.mapNotNull { photo ->
+                            if (photo.id in excluded) return@mapNotNull null
                             val embedding = embeds[photo.id] ?: return@mapNotNull null
                             val score = Embeddings.cosine(bundle.main, embedding)
                             if (score < FOLDER_THRESHOLD) return@mapNotNull null
@@ -524,7 +533,54 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     fun deleteCustomFolder(albumId: String) {
         val folderId = albumId.removePrefix("custom:").toLongOrNull() ?: return
-        viewModelScope.launch { folderDao.delete(folderId) }
+        viewModelScope.launch {
+            folderDao.delete(folderId)
+            folderDao.clearExclusions(folderId)
+        }
+    }
+
+    /** Manual curation: kick wrongly-matched photos out of a smart folder forever. */
+    fun excludeFromFolder(albumId: String, photoIds: Set<Long>) {
+        val folderId = albumId.removePrefix("custom:").toLongOrNull() ?: return
+        viewModelScope.launch {
+            folderDao.exclude(photoIds.map { FolderExclusionEntity(folderId, it) })
+            clearSelection()
+        }
+    }
+
+    // ----- Copy / move to device folder -----
+
+    /** (done, total) while copying, null when idle. */
+    val copyProgress = MutableStateFlow<Pair<Int, Int>?>(null)
+
+    /**
+     * Copies the selected photos into Pictures/<folderName>. When [move] is
+     * true, the originals are then deleted (system confirmation dialog via
+     * [onNeedsDeleteConfirm], same flow as normal delete).
+     */
+    fun copySelectedToFolder(
+        folderName: String,
+        move: Boolean,
+        onNeedsDeleteConfirm: (android.content.IntentSender) -> Unit
+    ) {
+        if (copyProgress.value != null) return
+        val ids = selectedIds.value
+        viewModelScope.launch {
+            try {
+                val targets = _allPhotos.value.filter { it.id in ids }
+                copyProgress.value = 0 to targets.size
+                val copied = repository.copyPhotosToFolder(targets, folderName)
+                copyProgress.value = copied to targets.size
+                if (move && copied > 0) {
+                    deletePhotoIds(ids, onNeedsDeleteConfirm)
+                } else {
+                    clearSelection()
+                    reloadPhotos()
+                }
+            } finally {
+                copyProgress.value = null
+            }
+        }
     }
 
     // ----- Album export (ZIP) -----

@@ -33,6 +33,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.rounded.Archive
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.RemoveCircleOutline
 import androidx.compose.material.icons.rounded.Photo
 import androidx.compose.material.icons.rounded.PhotoAlbum
 import androidx.compose.material.icons.rounded.Search
@@ -422,17 +423,58 @@ private fun AlbumDetailScreen(
 ) {
     val favorites by viewModel.favoriteIds.collectAsStateWithLifecycle()
     val exportProgress by viewModel.exportProgress.collectAsStateWithLifecycle()
+    val selected by viewModel.selectedIds.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val deleteLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) viewModel.onDeleteConfirmed()
+    }
+    val isCustomFolder = album.id.startsWith("custom:")
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(album.title, style = MaterialTheme.typography.titleLarge) },
+                title = {
+                    Text(
+                        if (selected.isEmpty()) album.title else "${selected.size} dipilih",
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = {
+                        if (selected.isEmpty()) onBack() else viewModel.clearSelection()
+                    }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Kembali")
                     }
                 },
                 actions = {
+                    if (selected.isNotEmpty()) {
+                        if (isCustomFolder) {
+                            IconButton(onClick = {
+                                viewModel.excludeFromFolder(album.id, selected)
+                            }) {
+                                Icon(
+                                    Icons.Rounded.RemoveCircleOutline,
+                                    contentDescription = "Keluarkan dari folder (foto tidak dihapus)",
+                                    tint = MaterialTheme.colorScheme.secondary
+                                )
+                            }
+                        }
+                        IconButton(onClick = {
+                            viewModel.deletePhotoIds(selected) { sender ->
+                                deleteLauncher.launch(
+                                    androidx.activity.result.IntentSenderRequest.Builder(sender).build()
+                                )
+                            }
+                        }) {
+                            Icon(
+                                Icons.Rounded.DeleteOutline,
+                                contentDescription = "Hapus foto dari perangkat",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
+                        return@TopAppBar
+                    }
                     val progress = exportProgress
                     if (progress != null) {
                         Text(
@@ -454,7 +496,7 @@ private fun AlbumDetailScreen(
                             )
                         }
                     }
-                    if (album.id.startsWith("custom:")) {
+                    if (isCustomFolder) {
                         IconButton(onClick = {
                             viewModel.deleteCustomFolder(album.id)
                             onBack()
@@ -483,7 +525,12 @@ private fun AlbumDetailScreen(
                 PhotoThumbnail(
                     photo = photo,
                     isFavorite = photo.id in favorites,
-                    onClick = { onPhotoClick(photo) }
+                    isSelected = photo.id in selected,
+                    onClick = {
+                        if (selected.isNotEmpty()) viewModel.toggleSelection(photo.id)
+                        else onPhotoClick(photo)
+                    },
+                    onLongClick = { viewModel.toggleSelection(photo.id) }
                 )
             }
         }

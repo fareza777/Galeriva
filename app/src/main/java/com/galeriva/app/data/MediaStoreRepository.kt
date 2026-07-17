@@ -35,6 +35,75 @@ class MediaStoreRepository(private val contentResolver: ContentResolver) {
         }
     }
 
+    /**
+     * Copies photos into a device folder under Pictures/<folderName>.
+     * Returns the number of photos copied successfully.
+     */
+    suspend fun copyPhotosToFolder(
+        photos: List<Photo>,
+        folderName: String
+    ): Int = withContext(Dispatchers.IO) {
+        val safeName = folderName.replace(Regex("[\\\\/:*?\"<>|]"), "").trim()
+        if (safeName.isEmpty()) return@withContext 0
+        var copied = 0
+        for (photo in photos) {
+            try {
+                val values = android.content.ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, photo.name.ifBlank { "foto_${photo.id}.jpg" })
+                    put(MediaStore.Images.Media.MIME_TYPE, mimeFromName(photo.name))
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/$safeName")
+                        put(MediaStore.Images.Media.IS_PENDING, 1)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        val dir = java.io.File(
+                            android.os.Environment.getExternalStoragePublicDirectory(
+                                android.os.Environment.DIRECTORY_PICTURES
+                            ),
+                            safeName
+                        ).apply { mkdirs() }
+                        @Suppress("DEPRECATION")
+                        put(
+                            MediaStore.Images.Media.DATA,
+                            java.io.File(dir, photo.name.ifBlank { "foto_${photo.id}.jpg" }).absolutePath
+                        )
+                    }
+                }
+                val target = contentResolver.insert(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values
+                ) ?: continue
+                contentResolver.openInputStream(photo.uri)?.use { input ->
+                    contentResolver.openOutputStream(target)?.use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    contentResolver.update(
+                        target,
+                        android.content.ContentValues().apply {
+                            put(MediaStore.Images.Media.IS_PENDING, 0)
+                        },
+                        null,
+                        null
+                    )
+                }
+                copied++
+            } catch (_: Exception) {
+                // Skip photos that fail to copy; report the successful count.
+            }
+        }
+        copied
+    }
+
+    private fun mimeFromName(name: String): String =
+        when (name.substringAfterLast('.', "").lowercase()) {
+            "png" -> "image/png"
+            "webp" -> "image/webp"
+            "gif" -> "image/gif"
+            "heic", "heif" -> "image/heic"
+            else -> "image/jpeg"
+        }
+
     /** MD5 of the full file content; null if unreadable. Used for duplicate detection. */
     suspend fun contentHash(uri: Uri): String? = withContext(Dispatchers.IO) {
         try {
