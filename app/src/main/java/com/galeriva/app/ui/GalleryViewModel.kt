@@ -173,17 +173,17 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     for (photo in photoList) {
                         val embedding = embeds[photo.id] ?: continue
                         val score = Embeddings.cosine(queryVector, embedding)
-                        if (score < SEMANTIC_THRESHOLD) continue
+                        if (score < SEMANTIC_FLOOR) continue
                         val distractor = distractors[photo.id] ?: 0f
-                        if (score + DISTRACTOR_MARGIN < distractor) continue
+                        if (score < distractor) continue
                         if (!beatsRivals(score, embedding, bundle.rivals)) continue
                         semanticScores[photo.id] = score
                     }
                 }
-                // Pass 2: relative cutoff — drop the weak tail far below the
-                // best match so borderline noise never reaches the user.
+                // Pass 2: ratio-based cutoff relative to the best match —
+                // scale-free, so it works regardless of the model's score range.
                 val best = semanticScores.values.maxOrNull() ?: 0f
-                val cutoff = maxOf(SEMANTIC_THRESHOLD, best - RELATIVE_MARGIN)
+                val cutoff = maxOf(SEMANTIC_FLOOR, best * SEARCH_RATIO)
 
                 val meta = metaById.value
                 photoList.mapNotNull { photo ->
@@ -192,10 +192,13 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                         photo.name.lowercase().contains(it) ||
                             photo.bucketName.lowercase().contains(it)
                     }
-                    // OCR: query words found in the text inside the photo
-                    // (receipts, documents, signs) — high-precision evidence.
+                    // OCR: the FULL query phrase must appear in the photo's text.
+                    // Single-word matching flooded scene searches ("rapat di
+                    // kantor") with every letter/schedule containing "rapat".
                     val ocrText = meta[photo.id]?.ocrText.orEmpty()
-                    val ocrMatch = ocrText.isNotEmpty() && rawWords.any { it in ocrText }
+                    val phrase = query.lowercase().trim()
+                    val ocrMatch =
+                        phrase.length >= 4 && ocrText.isNotEmpty() && phrase in ocrText
                     when {
                         semantic >= cutoff -> photo to (1f + semantic)
                         ocrMatch -> photo to 0.9f
@@ -273,11 +276,14 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         combine(photos, embeddings, categoryPrototypes) { photos, embeds, prototypes ->
             SMART_CATEGORIES.mapNotNull { (title, _) ->
                 val prototype = prototypes[title] ?: return@mapNotNull null
-                val items = photos.filter { photo ->
-                    embeds[photo.id]?.let {
-                        Embeddings.cosine(it, prototype) >= ALBUM_THRESHOLD
-                    } == true
+                val scored = photos.mapNotNull { photo ->
+                    val embedding = embeds[photo.id] ?: return@mapNotNull null
+                    val score = Embeddings.cosine(embedding, prototype)
+                    if (score >= ALBUM_FLOOR) photo to score else null
                 }
+                val bestScore = scored.maxOfOrNull { it.second } ?: 0f
+                val cutoff = maxOf(ALBUM_FLOOR, bestScore * ALBUM_RATIO)
+                val items = scored.filter { it.second >= cutoff }.map { it.first }
                 if (items.isEmpty()) null
                 else SmartAlbum("smart:$title", title, items.first(), items)
             }
@@ -520,8 +526,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                             if (photo.id in excluded) return@mapNotNull null
                             val embedding = embeds[photo.id] ?: return@mapNotNull null
                             val score = Embeddings.cosine(bundle.main, embedding)
-                            if (score < FOLDER_THRESHOLD) return@mapNotNull null
-                            if (score + DISTRACTOR_MARGIN < (distractors[photo.id] ?: 0f)) {
+                            if (score < FOLDER_FLOOR) return@mapNotNull null
+                            if (score < (distractors[photo.id] ?: 0f)) {
                                 return@mapNotNull null
                             }
                             if (!beatsRivals(score, embedding, bundle.rivals)) {
@@ -538,7 +544,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                             photo to score
                         }
                         val best = scored.maxOfOrNull { it.second } ?: 0f
-                        val cutoff = maxOf(FOLDER_THRESHOLD, best - FOLDER_RELATIVE_MARGIN)
+                        val cutoff = maxOf(FOLDER_FLOOR, best * FOLDER_RATIO)
                         scored.filter { it.second >= cutoff }
                             .sortedByDescending { it.second }
                             .map { it.first }
@@ -686,12 +692,14 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         private const val SIMILARITY_THRESHOLD_BITS = 6
         // SigLIP similarity scale: the model's own sigmoid decision boundary
         // sits near cosine 0.11, so thresholds are far lower than CLIP's.
-        private const val SEMANTIC_THRESHOLD = 0.11f
-        private const val RELATIVE_MARGIN = 0.04f
-        private const val FOLDER_THRESHOLD = 0.125f
-        private const val FOLDER_RELATIVE_MARGIN = 0.03f
+        // Scale-free scoring: low absolute floors (any real match clears
+        // them regardless of the model's score range) plus ratio cutoffs
+        // relative to the best match, which do the actual precision work.
+        private const val SEMANTIC_FLOOR = 0.05f
+        private const val SEARCH_RATIO = 0.80f
+        private const val FOLDER_FLOOR = 0.06f
+        private const val FOLDER_RATIO = 0.85f
         private const val NEGATIVE_SIMILARITY = 0.80f
-        private const val DISTRACTOR_MARGIN = 0.01f
 
         private val DISTRACTOR_PROMPTS = listOf(
             "a passport-style ID photo of a face on a plain background",
@@ -714,7 +722,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             "orange", "red", "green", "blue", "yellow",
             "white", "black", "khaki", "brown", "purple", "gray"
         )
-        private const val ALBUM_THRESHOLD = 0.12f
+        private const val ALBUM_FLOOR = 0.07f
+        private const val ALBUM_RATIO = 0.80f
         private val PROMPT_TEMPLATES = listOf(
             "a photo of %s.",
             "a picture showing %s",
