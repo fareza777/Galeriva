@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.rounded.DriveFileMove
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -218,6 +219,9 @@ fun SelectionActionBar(
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.weight(1f)
             )
+            IconButton(onClick = { viewModel.selectAll(photos.map { it.id }) }) {
+                Icon(Icons.Rounded.SelectAll, "Pilih semua")
+            }
             IconButton(onClick = {
                 val uris = ArrayList(photos.filter { it.id in selected }.map { it.uri })
                 val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {

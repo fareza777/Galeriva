@@ -36,6 +36,7 @@ import androidx.compose.material.icons.rounded.Archive
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.RemoveCircleOutline
+import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material.icons.rounded.Photo
 import androidx.compose.material.icons.rounded.PhotoAlbum
 import androidx.compose.material.icons.rounded.Search
@@ -462,6 +463,37 @@ private fun AlbumDetailScreen(
         if (result.resultCode == android.app.Activity.RESULT_OK) viewModel.onDeleteConfirmed()
     }
     val isCustomFolder = album.id.startsWith("custom:")
+    val isDeviceFolder = album.id.startsWith("folder:")
+    var showDeleteFolderDialog by remember { mutableStateOf(false) }
+
+    if (showDeleteFolderDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showDeleteFolderDialog = false },
+            title = { Text("Hapus Isi Folder?") },
+            text = {
+                Text(
+                    "Semua ${album.photos.size} foto/video di \"${album.title}\" akan " +
+                        "dihapus dari perangkat (dengan konfirmasi sistem)."
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    showDeleteFolderDialog = false
+                    viewModel.deletePhotoIds(album.photos.map { it.id }.toSet()) { sender ->
+                        deleteLauncher.launch(
+                            androidx.activity.result.IntentSenderRequest.Builder(sender).build()
+                        )
+                    }
+                }) { Text("Hapus Semua", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = { showDeleteFolderDialog = false }
+                ) { Text("Batal") }
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -480,6 +512,14 @@ private fun AlbumDetailScreen(
                 },
                 actions = {
                     if (selected.isNotEmpty()) {
+                        IconButton(onClick = {
+                            viewModel.selectAll(album.photos.map { it.id })
+                        }) {
+                            Icon(
+                                Icons.Rounded.SelectAll,
+                                contentDescription = "Pilih semua di album ini"
+                            )
+                        }
                         if (isCustomFolder) {
                             IconButton(onClick = {
                                 viewModel.excludeFromFolder(album.id, selected)
@@ -535,6 +575,15 @@ private fun AlbumDetailScreen(
                             Icon(
                                 Icons.Rounded.DeleteOutline,
                                 contentDescription = "Hapus folder pintar",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                    if (isDeviceFolder) {
+                        IconButton(onClick = { showDeleteFolderDialog = true }) {
+                            Icon(
+                                Icons.Rounded.DeleteOutline,
+                                contentDescription = "Hapus seluruh isi folder",
                                 tint = MaterialTheme.colorScheme.error
                             )
                         }

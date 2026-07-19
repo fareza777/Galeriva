@@ -353,6 +353,10 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         selectedIds.value = emptySet()
     }
 
+    fun selectAll(ids: Collection<Long>) {
+        selectedIds.value = ids.toSet()
+    }
+
     /**
      * Deletes the given photos. If Android requires user confirmation,
      * [onNeedsConfirm] is invoked with the IntentSender to launch; after the
@@ -698,7 +702,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         private const val SEMANTIC_FLOOR = 0.05f
         private const val SEARCH_RATIO = 0.80f
         private const val FOLDER_FLOOR = 0.06f
-        private const val FOLDER_RATIO = 0.85f
+        private const val FOLDER_RATIO = 0.78f
         private const val NEGATIVE_SIMILARITY = 0.80f
 
         private val DISTRACTOR_PROMPTS = listOf(
@@ -714,7 +718,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             "a screenshot of a chat conversation with text messages",
             "a certificate, poster, or flyer with printed text",
             "an official ID portrait photo with a solid red or blue background",
-            "a formal portrait of a person in a white shirt and tie"
+            "a formal portrait of a person in a white shirt and tie",
+            "a close-up of the ground, floor tiles, or pavement with no people"
         )
 
         /** Colors used to build rival queries (attribute-binding guard). */
