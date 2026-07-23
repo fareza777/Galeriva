@@ -166,8 +166,12 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     .split(Regex("\\s+"))
                     .filter { it.length >= 4 }
 
-                // Pass 1: semantic scores above the absolute floor AND beating
-                // the photo's best distractor (contrastive zero-shot check).
+                // Pure contrastive zero-shot: a photo matches when the query
+                // prototype is competitive with (within a small margin of) the
+                // photo's strongest "false friend" distractor, and beats the
+                // color rivals. No ratio cutoff — recall scales naturally with
+                // how broad the concept is ("rapat" returns many; "kucing
+                // oranye di atap" returns few) instead of being capped.
                 val semanticScores = HashMap<Long, Float>()
                 if (queryVector != null && bundle != null) {
                     for (photo in photoList) {
@@ -175,19 +179,15 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                         val score = Embeddings.cosine(queryVector, embedding)
                         if (score < SEMANTIC_FLOOR) continue
                         val distractor = distractors[photo.id] ?: 0f
-                        if (score < distractor) continue
+                        if (distractor - score > DISTRACTOR_MARGIN) continue
                         if (!beatsRivals(score, embedding, bundle.rivals)) continue
                         semanticScores[photo.id] = score
                     }
                 }
-                // Pass 2: ratio-based cutoff relative to the best match —
-                // scale-free, so it works regardless of the model's score range.
-                val best = semanticScores.values.maxOrNull() ?: 0f
-                val cutoff = maxOf(SEMANTIC_FLOOR, best * SEARCH_RATIO)
 
                 val meta = metaById.value
                 photoList.mapNotNull { photo ->
-                    val semantic = semanticScores[photo.id] ?: 0f
+                    val semantic = semanticScores[photo.id]
                     val nameMatch = rawWords.any {
                         photo.name.lowercase().contains(it) ||
                             photo.bucketName.lowercase().contains(it)
@@ -200,7 +200,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     val ocrMatch =
                         phrase.length >= 4 && ocrText.isNotEmpty() && phrase in ocrText
                     when {
-                        semantic >= cutoff -> photo to (1f + semantic)
+                        semantic != null -> photo to (1f + semantic)
                         ocrMatch -> photo to 0.9f
                         nameMatch -> photo to 0.5f
                         else -> null
@@ -519,19 +519,20 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                             folderVectorCache[folder.query] = it
                         }
                     val items = if (bundle == null) emptyList() else {
-                        // Folders are curated collections — precision matters more
-                        // than recall, so the floor is stricter than search and a
-                        // relative cutoff trims everything far below the best match.
+                        // Same contrastive rule as search: the query prototype must
+                        // stay within DISTRACTOR_MARGIN of the strongest distractor
+                        // and beat the color rivals. No ratio cutoff — that was
+                        // capping folders to a handful of top-scoring items.
                         // Curation learning: embeddings of kicked-out photos act
                         // as negative exemplars — anything that looks more like a
                         // rejected photo than like the query is rejected too.
                         val negatives = excluded.mapNotNull { embeds[it] }
-                        val scored = photoList.mapNotNull { photo ->
+                        photoList.mapNotNull { photo ->
                             if (photo.id in excluded) return@mapNotNull null
                             val embedding = embeds[photo.id] ?: return@mapNotNull null
                             val score = Embeddings.cosine(bundle.main, embedding)
                             if (score < FOLDER_FLOOR) return@mapNotNull null
-                            if (score < (distractors[photo.id] ?: 0f)) {
+                            if ((distractors[photo.id] ?: 0f) - score > DISTRACTOR_MARGIN) {
                                 return@mapNotNull null
                             }
                             if (!beatsRivals(score, embedding, bundle.rivals)) {
@@ -547,9 +548,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                             }
                             photo to score
                         }
-                        val best = scored.maxOfOrNull { it.second } ?: 0f
-                        val cutoff = maxOf(FOLDER_FLOOR, best * FOLDER_RATIO)
-                        scored.filter { it.second >= cutoff }
                             .sortedByDescending { it.second }
                             .map { it.first }
                     }
@@ -694,15 +692,16 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     companion object {
         private const val SIMILARITY_THRESHOLD_BITS = 6
-        // SigLIP similarity scale: the model's own sigmoid decision boundary
-        // sits near cosine 0.11, so thresholds are far lower than CLIP's.
-        // Scale-free scoring: low absolute floors (any real match clears
-        // them regardless of the model's score range) plus ratio cutoffs
-        // relative to the best match, which do the actual precision work.
-        private const val SEMANTIC_FLOOR = 0.05f
-        private const val SEARCH_RATIO = 0.80f
-        private const val FOLDER_FLOOR = 0.06f
-        private const val FOLDER_RATIO = 0.78f
+        // Contrastive zero-shot scoring (SigLIP). Precision comes from the
+        // per-photo comparison against distractor/rival prototypes, NOT from a
+        // ratio cutoff — so recall scales with how broad the query is.
+        // A photo is kept when the query stays within DISTRACTOR_MARGIN of the
+        // photo's strongest distractor. Larger margin = more recall (looser);
+        // smaller = more precision. The absolute floor only removes "concept
+        // absent" photos where the query cosine is essentially noise.
+        private const val SEMANTIC_FLOOR = 0.03f
+        private const val FOLDER_FLOOR = 0.04f
+        private const val DISTRACTOR_MARGIN = 0.03f
         private const val NEGATIVE_SIMILARITY = 0.80f
 
         private val DISTRACTOR_PROMPTS = listOf(
